@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import logoImage from './assets/brand/logo.png'
+import ContextMenu from './components/ContextMenu'
+import DialogHost from './components/DialogHost'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
 import WorkspaceHeader from './components/WorkspaceHeader'
+import DataPanel from './features/data/DataPanel'
 import QueryPanel from './features/query/QueryPanel'
 import RawJsonPanel from './features/raw/RawJsonPanel'
 import StructurePanel from './features/structure/StructurePanel'
@@ -29,47 +32,10 @@ import {
 } from './lib/tableUtils'
 import type { PersistedDatabaseContent, SourceFormat } from './lib/fakeDbFormat'
 import type { FakeDb, TableRow } from './model/fakeDb'
+import type { ConfirmDialogState, ContextMenuState, DialogMode } from './types/ui'
 import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
 type Tab = 'data' | 'structure' | 'raw' | 'query'
-type DialogMode =
-  | 'schema'
-  | 'table'
-  | 'renameSchema'
-  | 'deleteSchema'
-  | 'renameTable'
-  | 'deleteTable'
-  | 'addColumn'
-  | 'renameColumn'
-  | 'deleteColumn'
-  | null
-
-type ConfirmDialogState = {
-  title: string
-  message: string
-  confirmLabel: string
-  confirmKind?: 'primary' | 'danger'
-  onConfirm: () => void | Promise<void>
-  saveAndContinueLabel?: string
-  onSaveAndContinue?: () => void | Promise<void>
-} | null
-
-type ContextMenuState =
-  | {
-      kind: 'schema'
-      x: number
-      y: number
-      schemaName: string
-    }
-  | {
-      kind: 'table'
-      x: number
-      y: number
-      schemaName: string
-      tableName: string
-    }
-  | null
-
 type SortDirection = 'asc' | 'desc'
 
 type TableSortState = {
@@ -1127,96 +1093,22 @@ function App(): JSX.Element {
 
           <div className="panel">
             {activeTab === 'data' && (
-              <div className="data-panel">
-                <div className="data-toolbar">
-                  <input
-                    className="table-filter-input"
-                    value={tableFilter}
-                    placeholder="Search rows..."
-                    onChange={(event) => setTableFilter(event.target.value)}
-                    disabled={!selectedTable || rows.length === 0}
-                  />
-
-                  <div className="data-toolbar-info">
-                    {tableFilter.trim()
-                      ? `${filteredRows.length} of ${rows.length} row(s)`
-                      : `${rows.length} row(s)`}
-                  </div>
-
-                  {tableFilter.trim() && (
-                    <button onClick={() => setTableFilter('')}>Clear Filter</button>
-                  )}
-                </div>
-
-                <div className="table-wrapper">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th className="row-number">#</th>
-                        {columns.map((column) => (
-                          <th key={column}>
-                            <button
-                              className={
-                                tableSort?.column === column
-                                  ? 'column-sort-button active'
-                                  : 'column-sort-button'
-                              }
-                              onClick={() => toggleTableSort(column)}
-                              title={`Sort by ${column}`}
-                            >
-                              <span>{column}</span>
-                              <span className="column-sort-indicator">
-                                {getTableSortIndicator(column)}
-                              </span>
-                            </button>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {sortedFilteredRows.map(({ row, originalIndex }) => (
-                        <tr
-                          key={originalIndex}
-                          className={selectedRowIndex === originalIndex ? 'selected-row' : ''}
-                          onClick={() => setSelectedRowIndex(originalIndex)}
-                        >
-                          <td className="row-number">{originalIndex + 1}</td>
-
-                          {columns.map((column) => (
-                            <td key={column}>
-                              <input
-                                className="cell-input"
-                                value={stringifyValue(row[column])}
-                                onChange={(event) =>
-                                  handleCellChange(originalIndex, column, event.target.value)
-                                }
-                                onFocus={() => setSelectedRowIndex(originalIndex)}
-                              />
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-
-                      {rows.length === 0 && (
-                        <tr>
-                          <td colSpan={columns.length + 1} className="empty-cell">
-                            Empty table. Click ?+ Row? to create the first record.
-                          </td>
-                        </tr>
-                      )}
-
-                      {rows.length > 0 && filteredRows.length === 0 && (
-                        <tr>
-                          <td colSpan={columns.length + 1} className="empty-cell">
-                            No rows matched the current filter.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <DataPanel
+                tableFilter={tableFilter}
+                selectedTable={selectedTable}
+                rowsCount={rows.length}
+                filteredRowsCount={filteredRows.length}
+                columns={columns}
+                activeSortColumn={tableSort?.column ?? null}
+                sortedFilteredRows={sortedFilteredRows}
+                selectedRowIndex={selectedRowIndex}
+                onFilterChange={setTableFilter}
+                onClearFilter={() => setTableFilter('')}
+                onToggleSort={toggleTableSort}
+                getTableSortIndicator={getTableSortIndicator}
+                onSelectRow={setSelectedRowIndex}
+                onCellChange={handleCellChange}
+              />
             )}
 
             {activeTab === 'structure' && (
@@ -1276,504 +1168,66 @@ function App(): JSX.Element {
         </section>
       </main>
 
-      {contextMenu !== null &&
-        (() => {
-          const menu = contextMenu
-
-          return (
-            <div
-              className="context-menu-backdrop"
-              onClick={() => setContextMenu(null)}
-              onContextMenu={(event) => {
-                event.preventDefault()
-                setContextMenu(null)
-              }}
-            >
-              <div
-                className="context-menu"
-                style={{
-                  left: menu.x,
-                  top: menu.y
-                }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {menu.kind === 'schema' && (
-                  <>
-                    <div className="context-menu-title">Schema: {menu.schemaName}</div>
-
-                    <button onClick={() => openCreateTableDialog(menu.schemaName)}>
-                      + Create Table
-                    </button>
-
-                    <button onClick={() => openRenameSchemaDialog(menu.schemaName)}>
-                      Rename Schema
-                    </button>
-
-                    <button
-                      className="danger-menu-item"
-                      onClick={() => openDeleteSchemaDialog(menu.schemaName)}
-                    >
-                      Delete Schema
-                    </button>
-                  </>
-                )}
-
-                {menu.kind === 'table' && (
-                  <>
-                    <div className="context-menu-title">
-                      Table: {menu.schemaName}.{menu.tableName}
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setContextMenu(null)
-                        requestRawJsonConfirmation(() => {
-                          setSelectedSchema(menu.schemaName)
-                          setSelectedTable(menu.tableName)
-                          setActiveTab('data')
-                          resetTableUiState()
-                        })
-                      }}
-                    >
-                      Open Data
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setContextMenu(null)
-                        requestRawJsonConfirmation(() => {
-                          setSelectedSchema(menu.schemaName)
-                          setSelectedTable(menu.tableName)
-                          setActiveTab('structure')
-                          resetTableUiState()
-                        })
-                      }}
-                    >
-                      Open Structure
-                    </button>
-
-                    <button onClick={() => openRenameTableDialog(menu.schemaName, menu.tableName)}>
-                      Rename Table
-                    </button>
-
-                    <button
-                      className="danger-menu-item"
-                      onClick={() => openDeleteTableDialog(menu.schemaName, menu.tableName)}
-                    >
-                      Delete Table
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )
-        })()}
-
-      {confirmDialog !== null && (
-        <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{confirmDialog.title}</h3>
-              <button className="icon-button" onClick={() => setConfirmDialog(null)}>
-                ×
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-info">{confirmDialog.message}</div>
-            </div>
-
-            <div className="modal-actions">
-              <button onClick={() => setConfirmDialog(null)}>Cancel</button>
-
-              {confirmDialog.onSaveAndContinue && (
-                <button
-                  className="primary"
-                  onClick={() => void confirmDialog.onSaveAndContinue?.()}
-                >
-                  {confirmDialog.saveAndContinueLabel ?? 'Save and continue'}
-                </button>
-              )}
-
-              <button
-                className={confirmDialog.confirmKind === 'danger' ? 'danger-button' : 'primary'}
-                onClick={() => void confirmDialog.onConfirm()}
-              >
-                {confirmDialog.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
+      {contextMenu !== null && (
+        <ContextMenu
+          contextMenu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onCreateTable={openCreateTableDialog}
+          onRenameSchema={openRenameSchemaDialog}
+          onDeleteSchema={openDeleteSchemaDialog}
+          onOpenTableData={(schemaName, tableName) => {
+            setContextMenu(null)
+            requestRawJsonConfirmation(() => {
+              setSelectedSchema(schemaName)
+              setSelectedTable(tableName)
+              setActiveTab('data')
+              resetTableUiState()
+            })
+          }}
+          onOpenTableStructure={(schemaName, tableName) => {
+            setContextMenu(null)
+            requestRawJsonConfirmation(() => {
+              setSelectedSchema(schemaName)
+              setSelectedTable(tableName)
+              setActiveTab('structure')
+              resetTableUiState()
+            })
+          }}
+          onRenameTable={openRenameTableDialog}
+          onDeleteTable={openDeleteTableDialog}
+        />
       )}
 
-      {dialogMode !== null && (
-        <div className="modal-backdrop" onClick={() => setDialogMode(null)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            {dialogMode === 'schema' && (
-              <>
-                <div className="modal-header">
-                  <h3>Create Schema</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <label className="field-label" htmlFor="schema-name">
-                    Schema name
-                  </label>
-
-                  <input
-                    id="schema-name"
-                    className="modal-input"
-                    value={schemaNameInput}
-                    autoFocus
-                    onChange={(event) => setSchemaNameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleCreateSchema()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleCreateSchema}>
-                    Create Schema
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'table' && (
-              <>
-                <div className="modal-header">
-                  <h3>Create Table</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="modal-info">
-                    Schema: <strong>{selectedSchema}</strong>
-                  </div>
-
-                  <label className="field-label" htmlFor="table-name">
-                    Table name
-                  </label>
-
-                  <input
-                    id="table-name"
-                    className="modal-input"
-                    value={tableNameInput}
-                    autoFocus
-                    onChange={(event) => setTableNameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-
-                  <label className="field-label" htmlFor="table-columns">
-                    Columns
-                  </label>
-
-                  <input
-                    id="table-columns"
-                    className="modal-input"
-                    value={columnsInput}
-                    placeholder="id,name,active"
-                    onChange={(event) => setColumnsInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleCreateTable()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-
-                  <div className="modal-hint">
-                    Separate columns with comma, example: <code>id,name,surname,active</code>
-                  </div>
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleCreateTable}>
-                    Create Table
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'renameSchema' && (
-              <>
-                <div className="modal-header">
-                  <h3>Rename Schema</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="modal-info">
-                    Current schema: <strong>{selectedSchema}</strong>
-                  </div>
-
-                  <label className="field-label" htmlFor="rename-schema">
-                    New schema name
-                  </label>
-
-                  <input
-                    id="rename-schema"
-                    className="modal-input"
-                    value={renameInput}
-                    autoFocus
-                    onChange={(event) => setRenameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleRenameSchema()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleRenameSchema}>
-                    Rename Schema
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'deleteSchema' && (
-              <>
-                <div className="modal-header">
-                  <h3>Delete Schema</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="danger-box">
-                    You are about to delete schema <strong>{selectedSchema}</strong> and all its
-                    tables.
-                  </div>
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="danger-button" onClick={handleDeleteSchema}>
-                    Delete Schema
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'renameTable' && (
-              <>
-                <div className="modal-header">
-                  <h3>Rename Table</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="modal-info">
-                    Current table:{' '}
-                    <strong>
-                      {selectedSchema}.{selectedTable}
-                    </strong>
-                  </div>
-
-                  <label className="field-label" htmlFor="rename-table">
-                    New table name
-                  </label>
-
-                  <input
-                    id="rename-table"
-                    className="modal-input"
-                    value={renameInput}
-                    autoFocus
-                    onChange={(event) => setRenameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleRenameTable()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleRenameTable}>
-                    Rename Table
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'deleteTable' && (
-              <>
-                <div className="modal-header">
-                  <h3>Delete Table</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="danger-box">
-                    You are about to delete table{' '}
-                    <strong>
-                      {selectedSchema}.{selectedTable}
-                    </strong>
-                    .
-                  </div>
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="danger-button" onClick={handleDeleteTable}>
-                    Delete Table
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'addColumn' && (
-              <>
-                <div className="modal-header">
-                  <h3>Add Column</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="modal-info">
-                    Table:{' '}
-                    <strong>
-                      {selectedSchema}.{selectedTable}
-                    </strong>
-                  </div>
-
-                  <label className="field-label" htmlFor="column-name">
-                    Column name
-                  </label>
-
-                  <input
-                    id="column-name"
-                    className="modal-input"
-                    value={columnNameInput}
-                    autoFocus
-                    onChange={(event) => setColumnNameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleAddColumn()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-
-                  <label className="field-label" htmlFor="column-default">
-                    Default value
-                  </label>
-
-                  <input
-                    id="column-default"
-                    className="modal-input"
-                    value={columnDefaultInput}
-                    placeholder='Example: "", 0, true, null'
-                    onChange={(event) => setColumnDefaultInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleAddColumn()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-
-                  <div className="modal-hint">
-                    Values are parsed like cells: <code>true</code>, <code>false</code>,{' '}
-                    <code>null</code>, numbers and JSON objects/arrays are supported.
-                  </div>
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleAddColumn}>
-                    Add Column
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'renameColumn' && (
-              <>
-                <div className="modal-header">
-                  <h3>Rename Column</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="modal-info">
-                    Current column: <strong>{selectedColumnName}</strong>
-                  </div>
-
-                  <label className="field-label" htmlFor="rename-column">
-                    New column name
-                  </label>
-
-                  <input
-                    id="rename-column"
-                    className="modal-input"
-                    value={columnNameInput}
-                    autoFocus
-                    onChange={(event) => setColumnNameInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') handleRenameColumn()
-                      if (event.key === 'Escape') setDialogMode(null)
-                    }}
-                  />
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="primary" onClick={handleRenameColumn}>
-                    Rename Column
-                  </button>
-                </div>
-              </>
-            )}
-
-            {dialogMode === 'deleteColumn' && (
-              <>
-                <div className="modal-header">
-                  <h3>Delete Column</h3>
-                  <button className="icon-button" onClick={() => setDialogMode(null)}>
-                    ×
-                  </button>
-                </div>
-
-                <div className="modal-body">
-                  <div className="danger-box">
-                    You are about to delete column <strong>{selectedColumnName}</strong> from table{' '}
-                    <strong>
-                      {selectedSchema}.{selectedTable}
-                    </strong>
-                    .
-                  </div>
-                </div>
-
-                <div className="modal-actions">
-                  <button onClick={() => setDialogMode(null)}>Cancel</button>
-                  <button className="danger-button" onClick={handleDeleteColumn}>
-                    Delete Column
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <DialogHost
+        confirmDialog={confirmDialog}
+        dialogMode={dialogMode}
+        selectedSchema={selectedSchema}
+        selectedTable={selectedTable}
+        selectedColumnName={selectedColumnName}
+        schemaNameInput={schemaNameInput}
+        tableNameInput={tableNameInput}
+        columnsInput={columnsInput}
+        renameInput={renameInput}
+        columnNameInput={columnNameInput}
+        columnDefaultInput={columnDefaultInput}
+        onCloseConfirmDialog={() => setConfirmDialog(null)}
+        onCloseDialog={() => setDialogMode(null)}
+        onSchemaNameInputChange={setSchemaNameInput}
+        onTableNameInputChange={setTableNameInput}
+        onColumnsInputChange={setColumnsInput}
+        onRenameInputChange={setRenameInput}
+        onColumnNameInputChange={setColumnNameInput}
+        onColumnDefaultInputChange={setColumnDefaultInput}
+        onCreateSchema={handleCreateSchema}
+        onCreateTable={handleCreateTable}
+        onRenameSchema={handleRenameSchema}
+        onDeleteSchema={handleDeleteSchema}
+        onRenameTable={handleRenameTable}
+        onDeleteTable={handleDeleteTable}
+        onAddColumn={handleAddColumn}
+        onRenameColumn={handleRenameColumn}
+        onDeleteColumn={handleDeleteColumn}
+      />
 
       <StatusBar
         statusMessage={statusMessage}
