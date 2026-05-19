@@ -8,7 +8,7 @@ function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1280,
-    height: 690,
+    height: 760,
     show: false,
     title: 'FakeDB Studio',
     icon,
