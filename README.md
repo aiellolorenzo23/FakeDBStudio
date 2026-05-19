@@ -1,4 +1,4 @@
-# <div align="center"><img src="resources/logo.png" alt="FakeDB Studio logo" width="50%" /><br /></div>
+# <div align="center"><img src="resources/logo.png" alt="FakeDB Studio logo" width="69%" /></div>
 
 ## IT
 
