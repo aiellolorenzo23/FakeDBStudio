@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import { mockDb } from './mock/mockDb'
 import type { FakeDb, JsonValue, TableRow } from './model/fakeDb'
@@ -357,6 +357,11 @@ function App(): JSX.Element {
   }, [db, selectedSchema, selectedTable])
 
   const columns = useMemo(() => inferColumns(rows), [rows])
+  const currentRawJsonText = useMemo(() => {
+    return JSON.stringify(rows, null, 2)
+  }, [rows])
+
+  const displayedRawJsonText = isRawDirty ? rawJsonText : currentRawJsonText
   const queryResultColumns = useMemo(() => inferColumns(queryResultRows), [queryResultRows])
   const filteredRows = useMemo(() => {
     const normalizedFilter = tableFilter.trim().toLowerCase()
@@ -374,17 +379,6 @@ function App(): JSX.Element {
       columns.some((column) => stringifyValue(row[column]).toLowerCase().includes(normalizedFilter))
     )
   }, [rows, columns, tableFilter])
-
-  useEffect(() => {
-    setRawJsonText(JSON.stringify(rows, null, 2))
-    setRawJsonError(null)
-    setIsRawDirty(false)
-  }, [selectedSchema, selectedTable, rows])
-
-  useEffect(() => {
-    setTableFilter('')
-    setSelectedRowIndex(null)
-  }, [selectedSchema, selectedTable])
 
   function updateCurrentTable(nextRows: TableRow[]): void {
     setDb((currentDb) => ({
@@ -406,12 +400,12 @@ function App(): JSX.Element {
 
     setSelectedSchema(schemaName)
     setSelectedTable(schemaTables[0] ?? '')
-    setSelectedRowIndex(null)
+    resetTableUiState()
   }
 
   function handleTableClick(tableName: string): void {
     setSelectedTable(tableName)
-    setSelectedRowIndex(null)
+    resetTableUiState()
   }
 
   function handleCellChange(rowIndex: number, column: string, rawValue: string): void {
@@ -480,7 +474,15 @@ function App(): JSX.Element {
 
     setSelectedSchema(firstSchema)
     setSelectedTable(firstTable)
+    resetTableUiState()
+  }
+
+  function resetTableUiState(): void {
+    setTableFilter('')
     setSelectedRowIndex(null)
+    setRawJsonText('')
+    setRawJsonError(null)
+    setIsRawDirty(false)
   }
 
   async function handleOpenDatabase(): Promise<void> {
@@ -556,7 +558,7 @@ function App(): JSX.Element {
     setFilePath(null)
     setSelectedSchema('main')
     setSelectedTable('')
-    setSelectedRowIndex(null)
+    resetTableUiState()
     setHasUnsavedChanges(true)
     setStatusMessage('New database created')
   }
@@ -971,10 +973,12 @@ function App(): JSX.Element {
 
   function handleFormatRawJson(): void {
     try {
-      const parsed = JSON.parse(rawJsonText) as unknown
+      const parsed = JSON.parse(displayedRawJsonText) as unknown
+      const formatted = JSON.stringify(parsed, null, 2)
 
-      setRawJsonText(JSON.stringify(parsed, null, 2))
+      setRawJsonText(formatted)
       setRawJsonError(null)
+      setIsRawDirty(formatted !== currentRawJsonText)
       setStatusMessage('Raw JSON formatted')
     } catch (error) {
       setRawJsonError(error instanceof Error ? error.message : String(error))
@@ -983,7 +987,7 @@ function App(): JSX.Element {
   }
 
   function handleResetRawJson(): void {
-    setRawJsonText(JSON.stringify(rows, null, 2))
+    setRawJsonText('')
     setRawJsonError(null)
     setIsRawDirty(false)
     setStatusMessage('Raw JSON reset')
@@ -991,14 +995,17 @@ function App(): JSX.Element {
 
   function handleApplyRawJson(): void {
     try {
-      const parsed = JSON.parse(rawJsonText) as unknown
+      const parsed = JSON.parse(displayedRawJsonText) as unknown
 
       if (!isRawTable(parsed)) {
-        throw new Error('Table Raw JSON must be an array of objects.')
+        const message = 'Table Raw JSON must be an array of objects.'
+        setRawJsonError(message)
+        setStatusMessage('Invalid raw JSON')
+        return
       }
 
       updateCurrentTable(parsed)
-      setRawJsonText(JSON.stringify(parsed, null, 2))
+      setRawJsonText('')
       setRawJsonError(null)
       setIsRawDirty(false)
       setStatusMessage('Raw JSON applied to current table')
@@ -1015,7 +1022,11 @@ function App(): JSX.Element {
       const tableRows = db.schemas[schemaToUse]?.[parsedQuery.tableName]
 
       if (!tableRows) {
-        throw new Error(`Table "${schemaToUse}.${parsedQuery.tableName}" not found`)
+        setQueryResultRows([])
+        setQueryError(`Table "${schemaToUse}.${parsedQuery.tableName}" not found`)
+        setQueryHasRun(true)
+        setStatusMessage('Query failed')
+        return
       }
 
       const filteredRows = parsedQuery.where
@@ -1344,7 +1355,7 @@ function App(): JSX.Element {
               <div className="raw-panel">
                 <textarea
                   className={rawJsonError ? 'raw-editor raw-editor-error' : 'raw-editor'}
-                  value={rawJsonText}
+                  value={displayedRawJsonText}
                   onChange={(event) => handleRawJsonChange(event.target.value)}
                   spellCheck={false}
                 />
