@@ -15,6 +15,7 @@ type QueryPanelProps = {
   onClearQuery: () => void
   onUseCurrentTable: () => void
   onReuseQuery: (value: string) => void
+  onRemoveQuery: (value: string) => void
 }
 
 function QueryPanel({
@@ -30,7 +31,8 @@ function QueryPanel({
   onExecuteQuery,
   onClearQuery,
   onUseCurrentTable,
-  onReuseQuery
+  onReuseQuery,
+  onRemoveQuery
 }: QueryPanelProps): React.JSX.Element {
   return (
     <div className="query-panel">
@@ -63,15 +65,25 @@ function QueryPanel({
 
           <div className="query-history-list">
             {queryHistory.map((historyEntry) => (
-              <button
-                key={historyEntry}
-                className="query-history-item"
-                onClick={() => onReuseQuery(historyEntry)}
-                title={historyEntry}
-              >
-                <span className="query-history-label">{historyEntry}</span>
-                <span className="query-history-action">Use</span>
-              </button>
+              <div key={historyEntry} className="query-history-item">
+                <button
+                  className="query-history-use"
+                  onClick={() => onReuseQuery(historyEntry)}
+                  title={historyEntry}
+                >
+                  <span className="query-history-label">{historyEntry}</span>
+                  <span className="query-history-action">Use</span>
+                </button>
+
+                <button
+                  className="query-history-remove"
+                  onClick={() => onRemoveQuery(historyEntry)}
+                  title={`Remove query: ${historyEntry}`}
+                  aria-label={`Remove query: ${historyEntry}`}
+                >
+                  x
+                </button>
+              </div>
             ))}
           </div>
         </div>

@@ -1259,6 +1259,14 @@ function App(): JSX.Element {
                   setQueryError(null)
                   setQueryHasRun(false)
                 }}
+                onRemoveQuery={(value) => {
+                  void window.fakeDb
+                    .removeQueryHistoryEntry(value)
+                    .then((nextQueryHistory) => {
+                      setQueryHistory(nextQueryHistory)
+                    })
+                    .catch(() => {})
+                }}
               />
             )}
           </div>

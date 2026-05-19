@@ -83,6 +83,15 @@ async function pushQueryHistoryEntry(query: string): Promise<string[]> {
   return nextEntries
 }
 
+async function removeQueryHistoryEntry(query: string): Promise<string[]> {
+  const normalizedQuery = query.trim()
+  const currentEntries = await readQueryHistory()
+  const nextEntries = currentEntries.filter((entry) => entry !== normalizedQuery)
+
+  await writeQueryHistory(nextEntries)
+  return nextEntries
+}
+
 async function pushRecentFile(filePath: string): Promise<void> {
   const currentRecentFiles = await readRecentFiles()
   const nextRecentFiles = [
@@ -239,6 +248,10 @@ ipcMain.handle('fake-db:get-query-history', async () => {
 
 ipcMain.handle('fake-db:push-query-history-entry', async (_, query: string) => {
   return pushQueryHistoryEntry(query)
+})
+
+ipcMain.handle('fake-db:remove-query-history-entry', async (_, query: string) => {
+  return removeQueryHistoryEntry(query)
 })
 
 ipcMain.handle('fake-db:open-recent-database', async (_, filePath: string) => {

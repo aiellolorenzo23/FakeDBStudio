@@ -13,6 +13,9 @@ const fakeDbApi = {
   pushQueryHistoryEntry: (query: string) =>
     ipcRenderer.invoke('fake-db:push-query-history-entry', query),
 
+  removeQueryHistoryEntry: (query: string) =>
+    ipcRenderer.invoke('fake-db:remove-query-history-entry', query),
+
   openRecentDatabase: (filePath: string) =>
     ipcRenderer.invoke('fake-db:open-recent-database', filePath),
 

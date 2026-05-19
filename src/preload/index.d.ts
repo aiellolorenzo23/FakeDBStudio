@@ -25,6 +25,8 @@ export interface FakeDbApi {
 
   pushQueryHistoryEntry: (query: string) => Promise<string[]>
 
+  removeQueryHistoryEntry: (query: string) => Promise<string[]>
+
   openRecentDatabase: (filePath: string) => Promise<OpenDatabaseResult>
 
   saveDatabase: (filePath: string, content: string) => Promise<SaveDatabaseResult>
