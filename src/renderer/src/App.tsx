@@ -50,6 +50,7 @@ function App(): JSX.Element {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('data')
   const [query, setQuery] = useState('SELECT * FROM students')
+  const [queryHistory, setQueryHistory] = useState<string[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('Valid JSON')
@@ -249,6 +250,15 @@ function App(): JSX.Element {
     }
   }, [])
 
+  const refreshQueryHistory = useCallback(async (): Promise<void> => {
+    try {
+      const nextQueryHistory = await window.fakeDb.getQueryHistory()
+      setQueryHistory(nextQueryHistory)
+    } catch {
+      setQueryHistory([])
+    }
+  }, [])
+
   const applyOpenedDatabase = useCallback(
     (content: string, nextFilePath: string | null): void => {
       const parsedJson = JSON.parse(content) as unknown
@@ -292,33 +302,25 @@ function App(): JSX.Element {
   )
 
   useEffect(() => {
+    const loadInitialSidebarState = async (): Promise<void> => {
+      await Promise.allSettled([refreshRecentFiles(), refreshQueryHistory()])
+    }
+
     window.fakeDb
       .getLastOpenedFile()
-      .then((lastOpenedFile) => {
+      .then(async (lastOpenedFile) => {
         if (lastOpenedFile) {
-          return handleOpenRecentDatabase(lastOpenedFile)
+          await handleOpenRecentDatabase(lastOpenedFile)
+          await refreshQueryHistory()
+          return
         }
 
-        return window.fakeDb
-          .getRecentFiles()
-          .then((nextRecentFiles) => {
-            setRecentFiles(nextRecentFiles)
-          })
-          .catch(() => {
-            setRecentFiles([])
-          })
+        await loadInitialSidebarState()
       })
       .catch(() => {
-        window.fakeDb
-          .getRecentFiles()
-          .then((nextRecentFiles) => {
-            setRecentFiles(nextRecentFiles)
-          })
-          .catch(() => {
-            setRecentFiles([])
-          })
+        void loadInitialSidebarState()
       })
-  }, [handleOpenRecentDatabase])
+  }, [handleOpenRecentDatabase, refreshQueryHistory, refreshRecentFiles])
 
   async function handleOpenDatabase(): Promise<void> {
     try {
@@ -889,6 +891,12 @@ function App(): JSX.Element {
   function handleExecuteQuery(): void {
     try {
       const parsedQuery = parseSelectQuery(query)
+      void window.fakeDb
+        .pushQueryHistoryEntry(query)
+        .then((nextQueryHistory) => {
+          setQueryHistory(nextQueryHistory)
+        })
+        .catch(() => {})
       const schemaToUse = parsedQuery.schemaName ?? selectedSchema
       const tableRows = db.schemas[schemaToUse]?.[parsedQuery.tableName]
 
@@ -1219,6 +1227,7 @@ function App(): JSX.Element {
             {activeTab === 'query' && (
               <QueryPanel
                 query={query}
+                queryHistory={queryHistory}
                 selectedSchema={selectedSchema}
                 selectedTable={selectedTable}
                 queryError={queryError}
@@ -1240,6 +1249,12 @@ function App(): JSX.Element {
                 }}
                 onUseCurrentTable={() => {
                   setQuery(`SELECT * FROM ${selectedTable || 'table'}`)
+                  setQueryResultRows([])
+                  setQueryError(null)
+                  setQueryHasRun(false)
+                }}
+                onReuseQuery={(value) => {
+                  setQuery(value)
                   setQueryResultRows([])
                   setQueryError(null)
                   setQueryHasRun(false)

@@ -8,6 +8,11 @@ const fakeDbApi = {
 
   getLastOpenedFile: () => ipcRenderer.invoke('fake-db:get-last-opened-file'),
 
+  getQueryHistory: () => ipcRenderer.invoke('fake-db:get-query-history'),
+
+  pushQueryHistoryEntry: (query: string) =>
+    ipcRenderer.invoke('fake-db:push-query-history-entry', query),
+
   openRecentDatabase: (filePath: string) =>
     ipcRenderer.invoke('fake-db:open-recent-database', filePath),
 

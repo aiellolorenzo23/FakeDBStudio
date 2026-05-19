@@ -3,6 +3,7 @@ import type { TableRow } from '../../model/fakeDb'
 
 type QueryPanelProps = {
   query: string
+  queryHistory: string[]
   selectedSchema: string
   selectedTable: string
   queryError: string | null
@@ -13,10 +14,12 @@ type QueryPanelProps = {
   onExecuteQuery: () => void
   onClearQuery: () => void
   onUseCurrentTable: () => void
+  onReuseQuery: (value: string) => void
 }
 
 function QueryPanel({
   query,
+  queryHistory,
   selectedSchema,
   selectedTable,
   queryError,
@@ -26,7 +29,8 @@ function QueryPanel({
   onQueryChange,
   onExecuteQuery,
   onClearQuery,
-  onUseCurrentTable
+  onUseCurrentTable,
+  onReuseQuery
 }: QueryPanelProps): React.JSX.Element {
   return (
     <div className="query-panel">
@@ -52,6 +56,26 @@ function QueryPanel({
           Current Table
         </button>
       </div>
+
+      {queryHistory.length > 0 && (
+        <div className="query-history">
+          <div className="query-history-header">Recent queries</div>
+
+          <div className="query-history-list">
+            {queryHistory.map((historyEntry) => (
+              <button
+                key={historyEntry}
+                className="query-history-item"
+                onClick={() => onReuseQuery(historyEntry)}
+                title={historyEntry}
+              >
+                <span className="query-history-label">{historyEntry}</span>
+                <span className="query-history-action">Use</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {queryError && <div className="query-error">{queryError}</div>}
 

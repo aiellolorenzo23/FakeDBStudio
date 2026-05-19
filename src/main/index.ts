@@ -5,8 +5,10 @@ import icon from '../../resources/icon.png?asset'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 
 const RECENT_FILES_LIMIT = 8
+const QUERY_HISTORY_LIMIT = 20
 const recentFilesPath = join(app.getPath('userData'), 'recent-files.json')
 const lastOpenedFilePath = join(app.getPath('userData'), 'last-opened-file.json')
+const queryHistoryPath = join(app.getPath('userData'), 'query-history.json')
 
 async function readRecentFiles(): Promise<string[]> {
   try {
@@ -42,6 +44,43 @@ async function readLastOpenedFile(): Promise<string | null> {
 async function writeLastOpenedFile(filePath: string | null): Promise<void> {
   await mkdir(join(lastOpenedFilePath, '..'), { recursive: true })
   await writeFile(lastOpenedFilePath, JSON.stringify(filePath, null, 2), 'utf-8')
+}
+
+async function readQueryHistory(): Promise<string[]> {
+  try {
+    const content = await readFile(queryHistoryPath, 'utf-8')
+    const parsed = JSON.parse(content) as unknown
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed.filter((entry): entry is string => typeof entry === 'string')
+  } catch {
+    return []
+  }
+}
+
+async function writeQueryHistory(entries: string[]): Promise<void> {
+  await mkdir(join(queryHistoryPath, '..'), { recursive: true })
+  await writeFile(queryHistoryPath, JSON.stringify(entries, null, 2), 'utf-8')
+}
+
+async function pushQueryHistoryEntry(query: string): Promise<string[]> {
+  const normalizedQuery = query.trim()
+
+  if (!normalizedQuery) {
+    return readQueryHistory()
+  }
+
+  const currentEntries = await readQueryHistory()
+  const nextEntries = [
+    normalizedQuery,
+    ...currentEntries.filter((entry) => entry !== normalizedQuery)
+  ].slice(0, QUERY_HISTORY_LIMIT)
+
+  await writeQueryHistory(nextEntries)
+  return nextEntries
 }
 
 async function pushRecentFile(filePath: string): Promise<void> {
@@ -192,6 +231,14 @@ ipcMain.handle('fake-db:get-recent-files', async () => {
 
 ipcMain.handle('fake-db:get-last-opened-file', async () => {
   return readLastOpenedFile()
+})
+
+ipcMain.handle('fake-db:get-query-history', async () => {
+  return readQueryHistory()
+})
+
+ipcMain.handle('fake-db:push-query-history-entry', async (_, query: string) => {
+  return pushQueryHistoryEntry(query)
 })
 
 ipcMain.handle('fake-db:open-recent-database', async (_, filePath: string) => {

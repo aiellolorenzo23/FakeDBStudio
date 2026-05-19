@@ -426,7 +426,7 @@ button:disabled:hover {
 
 .query-panel {
   display: grid;
-  grid-template-rows: 160px auto 1fr;
+  grid-template-rows: 160px auto auto 1fr;
   gap: 12px;
   height: 100%;
 }
@@ -438,6 +438,56 @@ button:disabled:hover {
 .query-actions {
   display: flex;
   gap: 8px;
+}
+
+.query-history {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.query-history-header {
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.query-history-list {
+  display: grid;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.query-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 10px 12px;
+  color: #cbd5e1;
+  text-align: left;
+}
+
+.query-history-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  font-size: 12px;
+}
+
+.query-history-action {
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .query-result-placeholder {
