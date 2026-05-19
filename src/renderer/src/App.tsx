@@ -44,6 +44,14 @@ type ContextMenuState =
     }
   | null
 
+type SourceFormat = 'fakeDb' | 'plainObject' | 'rootArray'
+
+type PersistedDatabaseContent = {
+  content: string
+  formatLabel: string
+  fallbackToFakeDb: boolean
+}
+
 function stringifyValue(value: JsonValue | undefined): string {
   if (value === undefined) return ''
   if (value === null) return 'null'
@@ -194,6 +202,120 @@ function isRawTableRow(value: unknown): value is TableRow {
 
 function isRawTable(value: unknown): value is TableRow[] {
   return Array.isArray(value) && value.every(isRawTableRow)
+}
+
+function detectSourceFormat(value: unknown): SourceFormat {
+  if (Array.isArray(value)) {
+    return 'rootArray'
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const objectValue = value as Record<string, unknown>
+
+    if (
+      typeof objectValue.version === 'string' &&
+      typeof objectValue.schemas === 'object' &&
+      objectValue.schemas !== null &&
+      !Array.isArray(objectValue.schemas)
+    ) {
+      return 'fakeDb'
+    }
+
+    return 'plainObject'
+  }
+
+  return 'fakeDb'
+}
+
+function getSourceFormatLabel(sourceFormat: SourceFormat): string {
+  if (sourceFormat === 'fakeDb') return 'FakeDB'
+  if (sourceFormat === 'plainObject') return 'Plain JSON object'
+  if (sourceFormat === 'rootArray') return 'Root JSON array'
+
+  return 'Unknown'
+}
+
+function canPreserveRootArrayFormat(db: FakeDb): boolean {
+  const schemaNames = Object.keys(db.schemas)
+
+  return (
+    schemaNames.length === 1 &&
+    schemaNames[0] === 'main' &&
+    Object.keys(db.schemas.main ?? {}).length === 1 &&
+    Array.isArray(db.schemas.main?.root)
+  )
+}
+
+function canPreservePlainObjectFormat(db: FakeDb): boolean {
+  const schemaNames = Object.keys(db.schemas)
+
+  return schemaNames.length === 1 && schemaNames[0] === 'main'
+}
+
+function buildPlainObjectFromMainSchema(db: FakeDb): Record<string, JsonValue> {
+  const output: Record<string, JsonValue> = {}
+  const mainSchema = db.schemas.main ?? {}
+
+  Object.entries(mainSchema).forEach(([tableName, tableRows]) => {
+    if (tableName === '_properties') {
+      tableRows.forEach((row) => {
+        const key = row.key
+
+        if (typeof key === 'string' && key.length > 0) {
+          output[key] = row.value ?? null
+        }
+      })
+
+      return
+    }
+
+    output[tableName] = tableRows
+  })
+
+  return output
+}
+
+function buildPersistedDatabaseContent(
+  db: FakeDb,
+  sourceFormat: SourceFormat
+): PersistedDatabaseContent {
+  if (sourceFormat === 'rootArray') {
+    if (canPreserveRootArrayFormat(db)) {
+      return {
+        content: JSON.stringify(db.schemas.main.root, null, 2),
+        formatLabel: 'Root JSON array',
+        fallbackToFakeDb: false
+      }
+    }
+
+    return {
+      content: JSON.stringify(db, null, 2),
+      formatLabel: 'FakeDB',
+      fallbackToFakeDb: true
+    }
+  }
+
+  if (sourceFormat === 'plainObject') {
+    if (canPreservePlainObjectFormat(db)) {
+      return {
+        content: JSON.stringify(buildPlainObjectFromMainSchema(db), null, 2),
+        formatLabel: 'Plain JSON object',
+        fallbackToFakeDb: false
+      }
+    }
+
+    return {
+      content: JSON.stringify(db, null, 2),
+      formatLabel: 'FakeDB',
+      fallbackToFakeDb: true
+    }
+  }
+
+  return {
+    content: JSON.stringify(db, null, 2),
+    formatLabel: 'FakeDB',
+    fallbackToFakeDb: false
+  }
 }
 
 type QueryOperator = '=' | '!=' | '>' | '<' | '>=' | '<='
@@ -372,6 +494,7 @@ function App(): JSX.Element {
   const [tableFilter, setTableFilter] = useState('')
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
+  const [sourceFormat, setSourceFormat] = useState<SourceFormat>('fakeDb')
 
   const schemas = Object.keys(db.schemas)
 
@@ -490,8 +613,8 @@ function App(): JSX.Element {
     setSelectedRowIndex(selectedRowIndex + 1)
   }
 
-  function getDatabaseContent(): string {
-    return JSON.stringify(db, null, 2)
+  function getDatabaseContent(): PersistedDatabaseContent {
+    return buildPersistedDatabaseContent(db, sourceFormat)
   }
 
   function selectFirstAvailableTable(nextDb: FakeDb): void {
@@ -524,12 +647,14 @@ function App(): JSX.Element {
 
       const parsedJson = JSON.parse(result.content) as unknown
       const nextDb = normalizeJsonToFakeDb(parsedJson)
+      const nextSourceFormat = detectSourceFormat(parsedJson)
 
       setDb(nextDb)
+      setSourceFormat(nextSourceFormat)
       setFilePath(result.filePath ?? null)
       setHasUnsavedChanges(false)
       selectFirstAvailableTable(nextDb)
-      setStatusMessage('Database opened')
+      setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))
     }
@@ -540,11 +665,21 @@ function App(): JSX.Element {
       return handleSaveDatabaseAs(successMessage)
     }
 
-    const result = await window.fakeDb.saveDatabase(filePath, getDatabaseContent())
+    const persistedContent = getDatabaseContent()
+    const result = await window.fakeDb.saveDatabase(filePath, persistedContent.content)
 
     if (result.success) {
       setHasUnsavedChanges(false)
-      setStatusMessage(successMessage)
+
+      if (persistedContent.fallbackToFakeDb) {
+        setSourceFormat('fakeDb')
+        setStatusMessage(
+          `${successMessage} as FakeDB format because original format cannot represent current structure`
+        )
+      } else {
+        setStatusMessage(`${successMessage} as ${persistedContent.formatLabel}`)
+      }
+
       return true
     }
 
@@ -553,7 +688,8 @@ function App(): JSX.Element {
   }
 
   async function handleSaveDatabaseAs(successMessage = 'Database saved'): Promise<boolean> {
-    const result = await window.fakeDb.saveDatabaseAs(getDatabaseContent())
+    const persistedContent = getDatabaseContent()
+    const result = await window.fakeDb.saveDatabaseAs(persistedContent.content)
 
     if (result.canceled) {
       setStatusMessage('Save canceled')
@@ -563,7 +699,16 @@ function App(): JSX.Element {
     if (result.success && result.filePath) {
       setFilePath(result.filePath)
       setHasUnsavedChanges(false)
-      setStatusMessage(successMessage)
+
+      if (persistedContent.fallbackToFakeDb) {
+        setSourceFormat('fakeDb')
+        setStatusMessage(
+          `${successMessage} as FakeDB format because original format cannot represent current structure`
+        )
+      } else {
+        setStatusMessage(`${successMessage} as ${persistedContent.formatLabel}`)
+      }
+
       return true
     }
 
@@ -584,6 +729,7 @@ function App(): JSX.Element {
     }
 
     setDb(nextDb)
+    setSourceFormat('fakeDb')
     setFilePath(null)
     setSelectedSchema('main')
     setSelectedTable('')
@@ -1192,6 +1338,7 @@ function App(): JSX.Element {
             <div className="connection-path" title={displayedFilePath}>
               {displayedFilePath}
             </div>
+            <div className="connection-format">Format: {getSourceFormatLabel(sourceFormat)}</div>
           </div>
 
           <div className="sidebar-title">SCHEMAS</div>
