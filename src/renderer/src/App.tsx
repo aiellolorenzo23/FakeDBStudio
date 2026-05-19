@@ -1230,32 +1230,54 @@ function App(): JSX.Element {
             ))}
           </div>
 
-          <div className="sidebar-actions">
-            <button onClick={openCreateSchemaDialog}>+ Schema</button>
+          <div className="sidebar-action-groups">
+            <div className="sidebar-action-group">
+              <div className="sidebar-action-title">Create</div>
 
-            <button onClick={() => openCreateTableDialog()} disabled={!selectedSchema}>
-              + Table
-            </button>
-          </div>
+              <div className="sidebar-action-grid">
+                <button onClick={openCreateSchemaDialog}>+ Schema</button>
 
-          <div className="sidebar-actions">
-            <button onClick={() => openRenameSchemaDialog()} disabled={!selectedSchema}>
-              Rename Schema
-            </button>
+                <button onClick={() => openCreateTableDialog()} disabled={!selectedSchema}>
+                  + Table
+                </button>
+              </div>
+            </div>
 
-            <button onClick={() => openDeleteSchemaDialog()} disabled={!selectedSchema}>
-              Delete Schema
-            </button>
-          </div>
+            <div className="sidebar-action-group">
+              <div className="sidebar-action-title">Schema</div>
 
-          <div className="sidebar-actions">
-            <button onClick={() => openRenameTableDialog()} disabled={!selectedTable}>
-              Rename Table
-            </button>
+              <div className="sidebar-action-grid">
+                <button onClick={() => openRenameSchemaDialog()} disabled={!selectedSchema}>
+                  Rename
+                </button>
 
-            <button onClick={() => openDeleteTableDialog()} disabled={!selectedTable}>
-              Delete Table
-            </button>
+                <button
+                  className="danger-button subtle"
+                  onClick={() => openDeleteSchemaDialog()}
+                  disabled={!selectedSchema}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            <div className="sidebar-action-group">
+              <div className="sidebar-action-title">Table</div>
+
+              <div className="sidebar-action-grid">
+                <button onClick={() => openRenameTableDialog()} disabled={!selectedTable}>
+                  Rename
+                </button>
+
+                <button
+                  className="danger-button subtle"
+                  onClick={() => openDeleteTableDialog()}
+                  disabled={!selectedTable}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
           </div>
         </aside>
 

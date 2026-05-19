@@ -141,7 +141,7 @@ button:disabled:hover {
 
 .main-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 300px 1fr;
   min-height: 0;
 }
 
@@ -244,6 +244,38 @@ button:disabled:hover {
 
 .sidebar-actions button {
   flex: 1;
+}
+
+.sidebar-action-groups {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sidebar-action-group {
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-action-title {
+  color: #7dd3fc;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.sidebar-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sidebar-action-grid button {
+  min-height: 32px;
+  padding: 7px 8px;
+  font-size: 12px;
 }
 
 .workspace {
@@ -404,7 +436,8 @@ button:disabled:hover {
 }
 
 .statusbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 18px;
   padding: 0 12px;
@@ -412,6 +445,16 @@ button:disabled:hover {
   background: #020617;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.statusbar span {
+  white-space: nowrap;
+}
+
+.statusbar span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal-backdrop {
