@@ -18,6 +18,32 @@ type DialogMode =
   | 'deleteColumn'
   | null
 
+type ConfirmDialogState = {
+  title: string
+  message: string
+  confirmLabel: string
+  confirmKind?: 'primary' | 'danger'
+  onConfirm: () => void | Promise<void>
+  saveAndContinueLabel?: string
+  onSaveAndContinue?: () => void | Promise<void>
+} | null
+
+type ContextMenuState =
+  | {
+      kind: 'schema'
+      x: number
+      y: number
+      schemaName: string
+    }
+  | {
+      kind: 'table'
+      x: number
+      y: number
+      schemaName: string
+      tableName: string
+    }
+  | null
+
 function stringifyValue(value: JsonValue | undefined): string {
   if (value === undefined) return ''
   if (value === null) return 'null'
@@ -344,6 +370,8 @@ function App(): JSX.Element {
   const [queryError, setQueryError] = useState<string | null>(null)
   const [queryHasRun, setQueryHasRun] = useState(false)
   const [tableFilter, setTableFilter] = useState('')
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
 
   const schemas = Object.keys(db.schemas)
 
@@ -507,10 +535,9 @@ function App(): JSX.Element {
     }
   }
 
-  async function handleSaveDatabase(successMessage = 'Database saved'): Promise<void> {
+  async function handleSaveDatabase(successMessage = 'Database saved'): Promise<boolean> {
     if (!filePath) {
-      await handleSaveDatabaseAs(successMessage)
-      return
+      return handleSaveDatabaseAs(successMessage)
     }
 
     const result = await window.fakeDb.saveDatabase(filePath, getDatabaseContent())
@@ -518,28 +545,30 @@ function App(): JSX.Element {
     if (result.success) {
       setHasUnsavedChanges(false)
       setStatusMessage(successMessage)
-      return
+      return true
     }
 
     setStatusMessage(result.error ?? 'Save failed')
+    return false
   }
 
-  async function handleSaveDatabaseAs(successMessage = 'Database saved'): Promise<void> {
+  async function handleSaveDatabaseAs(successMessage = 'Database saved'): Promise<boolean> {
     const result = await window.fakeDb.saveDatabaseAs(getDatabaseContent())
 
     if (result.canceled) {
       setStatusMessage('Save canceled')
-      return
+      return false
     }
 
     if (result.success && result.filePath) {
       setFilePath(result.filePath)
       setHasUnsavedChanges(false)
       setStatusMessage(successMessage)
-      return
+      return true
     }
 
     setStatusMessage(result.error ?? 'Save failed')
+    return false
   }
 
   async function handleApplyChanges(): Promise<void> {
@@ -597,15 +626,17 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
-  function openCreateTableDialog(): void {
-    if (!selectedSchema) {
+  function openCreateTableDialog(schemaName = selectedSchema): void {
+    if (!schemaName) {
       setStatusMessage('Select or create a schema first')
       return
     }
 
+    setSelectedSchema(schemaName)
     setTableNameInput('new_table')
     setColumnsInput('id,name')
     setDialogMode('table')
+    setContextMenu(null)
   }
 
   function handleCreateTable(): void {
@@ -647,14 +678,16 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
-  function openRenameSchemaDialog(): void {
-    if (!selectedSchema) {
+  function openRenameSchemaDialog(schemaName = selectedSchema): void {
+    if (!schemaName) {
       setStatusMessage('Select a schema first')
       return
     }
 
-    setRenameInput(selectedSchema)
+    setSelectedSchema(schemaName)
+    setRenameInput(schemaName)
     setDialogMode('renameSchema')
+    setContextMenu(null)
   }
 
   function handleRenameSchema(): void {
@@ -702,13 +735,15 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
-  function openDeleteSchemaDialog(): void {
-    if (!selectedSchema) {
+  function openDeleteSchemaDialog(schemaName = selectedSchema): void {
+    if (!schemaName) {
       setStatusMessage('Select a schema first')
       return
     }
 
+    setSelectedSchema(schemaName)
     setDialogMode('deleteSchema')
+    setContextMenu(null)
   }
 
   function handleDeleteSchema(): void {
@@ -750,14 +785,17 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
-  function openRenameTableDialog(): void {
-    if (!selectedTable) {
+  function openRenameTableDialog(schemaName = selectedSchema, tableName = selectedTable): void {
+    if (!schemaName || !tableName) {
       setStatusMessage('Select a table first')
       return
     }
 
-    setRenameInput(selectedTable)
+    setSelectedSchema(schemaName)
+    setSelectedTable(tableName)
+    setRenameInput(tableName)
     setDialogMode('renameTable')
+    setContextMenu(null)
   }
 
   function handleRenameTable(): void {
@@ -810,13 +848,16 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
-  function openDeleteTableDialog(): void {
-    if (!selectedTable) {
+  function openDeleteTableDialog(schemaName = selectedSchema, tableName = selectedTable): void {
+    if (!schemaName || !tableName) {
       setStatusMessage('Select a table first')
       return
     }
 
+    setSelectedSchema(schemaName)
+    setSelectedTable(tableName)
     setDialogMode('deleteTable')
+    setContextMenu(null)
   }
 
   function handleDeleteTable(): void {
@@ -1053,6 +1094,65 @@ function App(): JSX.Element {
     }
   }
 
+  function requestUnsavedChangesConfirmation(action: () => void | Promise<void>): void {
+    if (!hasUnsavedChanges) {
+      void action()
+      return
+    }
+
+    setConfirmDialog({
+      title: 'Unsaved changes',
+      message: 'You have unsaved changes. Save them before continuing?',
+      confirmLabel: 'Discard changes',
+      confirmKind: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await action()
+      },
+      saveAndContinueLabel: 'Save and continue',
+      onSaveAndContinue: async () => {
+        const saved = await handleSaveDatabase('Database saved')
+
+        if (!saved) {
+          return
+        }
+
+        setConfirmDialog(null)
+        await action()
+      }
+    })
+  }
+
+  function openSchemaContextMenu(
+    event: React.MouseEvent<HTMLButtonElement>,
+    schemaName: string
+  ): void {
+    event.preventDefault()
+
+    setContextMenu({
+      kind: 'schema',
+      x: event.clientX,
+      y: event.clientY,
+      schemaName
+    })
+  }
+
+  function openTableContextMenu(
+    event: React.MouseEvent<HTMLButtonElement>,
+    schemaName: string,
+    tableName: string
+  ): void {
+    event.preventDefault()
+
+    setContextMenu({
+      kind: 'table',
+      x: event.clientX,
+      y: event.clientY,
+      schemaName,
+      tableName
+    })
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1061,9 +1161,13 @@ function App(): JSX.Element {
         </div>
 
         <div className="toolbar">
-          <button onClick={handleNewDatabase}>New DB</button>
+          <button onClick={() => requestUnsavedChangesConfirmation(handleNewDatabase)}>
+            New DB
+          </button>
 
-          <button onClick={() => void handleOpenDatabase()}>Open DB</button>
+          <button onClick={() => requestUnsavedChangesConfirmation(handleOpenDatabase)}>
+            Open DB
+          </button>
 
           <button onClick={() => void handleSaveDatabase()} disabled={!hasUnsavedChanges}>
             Save
@@ -1094,6 +1198,7 @@ function App(): JSX.Element {
                 <button
                   className={selectedSchema === schemaName ? 'schema-name selected' : 'schema-name'}
                   onClick={() => handleSchemaClick(schemaName)}
+                  onContextMenu={(event) => openSchemaContextMenu(event, schemaName)}
                 >
                   ▾ {schemaName}
                 </button>
@@ -1107,6 +1212,9 @@ function App(): JSX.Element {
                           selectedTable === tableName ? 'table-name selected' : 'table-name'
                         }
                         onClick={() => handleTableClick(tableName)}
+                        onContextMenu={(event) =>
+                          openTableContextMenu(event, schemaName, tableName)
+                        }
                       >
                         <span className="table-icon">▦</span>
                         {tableName}
@@ -1121,27 +1229,27 @@ function App(): JSX.Element {
           <div className="sidebar-actions">
             <button onClick={openCreateSchemaDialog}>+ Schema</button>
 
-            <button onClick={openCreateTableDialog} disabled={!selectedSchema}>
+            <button onClick={() => openCreateTableDialog()} disabled={!selectedSchema}>
               + Table
             </button>
           </div>
 
           <div className="sidebar-actions">
-            <button onClick={openRenameSchemaDialog} disabled={!selectedSchema}>
+            <button onClick={() => openRenameSchemaDialog()} disabled={!selectedSchema}>
               Rename Schema
             </button>
 
-            <button onClick={openDeleteSchemaDialog} disabled={!selectedSchema}>
+            <button onClick={() => openDeleteSchemaDialog()} disabled={!selectedSchema}>
               Delete Schema
             </button>
           </div>
 
           <div className="sidebar-actions">
-            <button onClick={openRenameTableDialog} disabled={!selectedTable}>
+            <button onClick={() => openRenameTableDialog()} disabled={!selectedTable}>
               Rename Table
             </button>
 
-            <button onClick={openDeleteTableDialog} disabled={!selectedTable}>
+            <button onClick={() => openDeleteTableDialog()} disabled={!selectedTable}>
               Delete Table
             </button>
           </div>
@@ -1486,6 +1594,132 @@ function App(): JSX.Element {
           </div>
         </section>
       </main>
+
+      {contextMenu !== null &&
+        (() => {
+          const menu = contextMenu
+
+          return (
+            <div
+              className="context-menu-backdrop"
+              onClick={() => setContextMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                setContextMenu(null)
+              }}
+            >
+              <div
+                className="context-menu"
+                style={{
+                  left: menu.x,
+                  top: menu.y
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {menu.kind === 'schema' && (
+                  <>
+                    <div className="context-menu-title">Schema: {menu.schemaName}</div>
+
+                    <button onClick={() => openCreateTableDialog(menu.schemaName)}>
+                      + Create Table
+                    </button>
+
+                    <button onClick={() => openRenameSchemaDialog(menu.schemaName)}>
+                      Rename Schema
+                    </button>
+
+                    <button
+                      className="danger-menu-item"
+                      onClick={() => openDeleteSchemaDialog(menu.schemaName)}
+                    >
+                      Delete Schema
+                    </button>
+                  </>
+                )}
+
+                {menu.kind === 'table' && (
+                  <>
+                    <div className="context-menu-title">
+                      Table: {menu.schemaName}.{menu.tableName}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSelectedSchema(menu.schemaName)
+                        setSelectedTable(menu.tableName)
+                        setActiveTab('data')
+                        resetTableUiState()
+                        setContextMenu(null)
+                      }}
+                    >
+                      Open Data
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setSelectedSchema(menu.schemaName)
+                        setSelectedTable(menu.tableName)
+                        setActiveTab('structure')
+                        resetTableUiState()
+                        setContextMenu(null)
+                      }}
+                    >
+                      Open Structure
+                    </button>
+
+                    <button onClick={() => openRenameTableDialog(menu.schemaName, menu.tableName)}>
+                      Rename Table
+                    </button>
+
+                    <button
+                      className="danger-menu-item"
+                      onClick={() => openDeleteTableDialog(menu.schemaName, menu.tableName)}
+                    >
+                      Delete Table
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
+      {confirmDialog !== null && (
+        <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{confirmDialog.title}</h3>
+              <button className="icon-button" onClick={() => setConfirmDialog(null)}>
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="modal-info">{confirmDialog.message}</div>
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={() => setConfirmDialog(null)}>Cancel</button>
+
+              {confirmDialog.onSaveAndContinue && (
+                <button
+                  className="primary"
+                  onClick={() => void confirmDialog.onSaveAndContinue?.()}
+                >
+                  {confirmDialog.saveAndContinueLabel ?? 'Save and continue'}
+                </button>
+              )}
+
+              <button
+                className={confirmDialog.confirmKind === 'danger' ? 'danger-button' : 'primary'}
+                onClick={() => void confirmDialog.onConfirm()}
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dialogMode !== null && (
         <div className="modal-backdrop" onClick={() => setDialogMode(null)}>
