@@ -69,7 +69,7 @@ function Sidebar({
                     className="table-name recent-file-open"
                     onClick={() => onOpenRecentFile(recentFile)}
                   >
-                    <span className="table-icon">?</span>
+                    <span className="table-icon">{'\u21BA'}</span>
                     <span className="connection-path" title={recentFile}>
                       {recentFile}
                     </span>
@@ -100,7 +100,7 @@ function Sidebar({
               onClick={() => onSchemaClick(schemaName)}
               onContextMenu={(event) => onSchemaContextMenu(event, schemaName)}
             >
-              ? {schemaName}
+              {'\u25BE'} {schemaName}
             </button>
 
             {selectedSchema === schemaName && (
@@ -112,7 +112,7 @@ function Sidebar({
                     onClick={() => onTableClick(tableName)}
                     onContextMenu={(event) => onTableContextMenu(event, schemaName, tableName)}
                   >
-                    <span className="table-icon">?</span>
+                    <span className="table-icon">{'\u25AA'}</span>
                     {tableName}
                   </button>
                 ))}

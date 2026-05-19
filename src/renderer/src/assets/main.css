@@ -248,6 +248,10 @@ button:disabled:hover {
   min-width: 0;
 }
 
+.recent-file-open .connection-path {
+  margin-top: 0;
+}
+
 .recent-file-remove {
   width: 22px;
   min-width: 22px;
@@ -260,6 +264,7 @@ button:disabled:hover {
   font-size: 11px;
   line-height: 1;
   font-weight: 700;
+  align-self: center;
 }
 
 .table-name {
