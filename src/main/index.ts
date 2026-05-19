@@ -2,7 +2,47 @@ import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { readFile, writeFile } from 'fs/promises'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+
+const RECENT_FILES_LIMIT = 8
+const recentFilesPath = join(app.getPath('userData'), 'recent-files.json')
+
+async function readRecentFiles(): Promise<string[]> {
+  try {
+    const content = await readFile(recentFilesPath, 'utf-8')
+    const parsed = JSON.parse(content) as unknown
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed.filter((entry): entry is string => typeof entry === 'string')
+  } catch {
+    return []
+  }
+}
+
+async function writeRecentFiles(filePaths: string[]): Promise<void> {
+  await mkdir(join(recentFilesPath, '..'), { recursive: true })
+  await writeFile(recentFilesPath, JSON.stringify(filePaths, null, 2), 'utf-8')
+}
+
+async function pushRecentFile(filePath: string): Promise<void> {
+  const currentRecentFiles = await readRecentFiles()
+  const nextRecentFiles = [
+    filePath,
+    ...currentRecentFiles.filter((entry) => entry !== filePath)
+  ].slice(0, RECENT_FILES_LIMIT)
+
+  await writeRecentFiles(nextRecentFiles)
+}
+
+async function removeRecentFile(filePath: string): Promise<void> {
+  const currentRecentFiles = await readRecentFiles()
+  const nextRecentFiles = currentRecentFiles.filter((entry) => entry !== filePath)
+
+  await writeRecentFiles(nextRecentFiles)
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -60,6 +100,7 @@ ipcMain.handle('fake-db:open-database', async () => {
 
   const filePath = result.filePaths[0]
   const content = await readFile(filePath, 'utf-8')
+  await pushRecentFile(filePath)
 
   return {
     canceled: false,
@@ -71,6 +112,7 @@ ipcMain.handle('fake-db:open-database', async () => {
 ipcMain.handle('fake-db:save-database', async (_, filePath: string, content: string) => {
   try {
     await writeFile(filePath, content, 'utf-8')
+    await pushRecentFile(filePath)
 
     return {
       success: true,
@@ -105,6 +147,7 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
 
   try {
     await writeFile(result.filePath, content, 'utf-8')
+    await pushRecentFile(result.filePath)
 
     return {
       success: true,
@@ -113,6 +156,30 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
   } catch (error) {
     return {
       success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+})
+
+ipcMain.handle('fake-db:get-recent-files', async () => {
+  return readRecentFiles()
+})
+
+ipcMain.handle('fake-db:open-recent-database', async (_, filePath: string) => {
+  try {
+    const content = await readFile(filePath, 'utf-8')
+    await pushRecentFile(filePath)
+
+    return {
+      canceled: false,
+      filePath,
+      content
+    }
+  } catch (error) {
+    await removeRecentFile(filePath)
+
+    return {
+      canceled: false,
       error: error instanceof Error ? error.message : String(error)
     }
   }

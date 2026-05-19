@@ -4,6 +4,11 @@ import { electronAPI } from '@electron-toolkit/preload'
 const fakeDbApi = {
   openDatabase: () => ipcRenderer.invoke('fake-db:open-database'),
 
+  getRecentFiles: () => ipcRenderer.invoke('fake-db:get-recent-files'),
+
+  openRecentDatabase: (filePath: string) =>
+    ipcRenderer.invoke('fake-db:open-recent-database', filePath),
+
   saveDatabase: (filePath: string, content: string) =>
     ipcRenderer.invoke('fake-db:save-database', filePath, content),
 

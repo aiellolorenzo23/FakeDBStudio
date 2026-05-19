@@ -4,6 +4,7 @@ export interface OpenDatabaseResult {
   canceled: boolean
   filePath?: string
   content?: string
+  error?: string
 }
 
 export interface SaveDatabaseResult {
@@ -15,6 +16,10 @@ export interface SaveDatabaseResult {
 
 export interface FakeDbApi {
   openDatabase: () => Promise<OpenDatabaseResult>
+
+  getRecentFiles: () => Promise<string[]>
+
+  openRecentDatabase: (filePath: string) => Promise<OpenDatabaseResult>
 
   saveDatabase: (filePath: string, content: string) => Promise<SaveDatabaseResult>
 

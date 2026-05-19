@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import logoImage from './assets/brand/logo.png'
 import ContextMenu from './components/ContextMenu'
@@ -53,6 +53,7 @@ function App(): JSX.Element {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('Valid JSON')
+  const [recentFiles, setRecentFiles] = useState<string[]>([])
   const [dialogMode, setDialogMode] = useState<DialogMode>(null)
   const [schemaNameInput, setSchemaNameInput] = useState('')
   const [tableNameInput, setTableNameInput] = useState('')
@@ -236,6 +237,39 @@ function App(): JSX.Element {
     setIsRawDirty(false)
   }
 
+  async function refreshRecentFiles(): Promise<void> {
+    try {
+      const nextRecentFiles = await window.fakeDb.getRecentFiles()
+      setRecentFiles(nextRecentFiles)
+    } catch {
+      setRecentFiles([])
+    }
+  }
+
+  function applyOpenedDatabase(content: string, nextFilePath: string | null): void {
+    const parsedJson = JSON.parse(content) as unknown
+    const nextDb = normalizeJsonToFakeDb(parsedJson)
+    const nextSourceFormat = detectSourceFormat(parsedJson)
+
+    setDb(nextDb)
+    setSourceFormat(nextSourceFormat)
+    setFilePath(nextFilePath)
+    setHasUnsavedChanges(false)
+    selectFirstAvailableTable(nextDb)
+    setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
+  }
+
+  useEffect(() => {
+    window.fakeDb
+      .getRecentFiles()
+      .then((nextRecentFiles) => {
+        setRecentFiles(nextRecentFiles)
+      })
+      .catch(() => {
+        setRecentFiles([])
+      })
+  }, [])
+
   async function handleOpenDatabase(): Promise<void> {
     try {
       const result = await window.fakeDb.openDatabase()
@@ -245,16 +279,31 @@ function App(): JSX.Element {
         return
       }
 
-      const parsedJson = JSON.parse(result.content) as unknown
-      const nextDb = normalizeJsonToFakeDb(parsedJson)
-      const nextSourceFormat = detectSourceFormat(parsedJson)
+      applyOpenedDatabase(result.content, result.filePath ?? null)
+      await refreshRecentFiles()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
 
-      setDb(nextDb)
-      setSourceFormat(nextSourceFormat)
-      setFilePath(result.filePath ?? null)
-      setHasUnsavedChanges(false)
-      selectFirstAvailableTable(nextDb)
-      setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
+  async function handleOpenRecentDatabase(nextFilePath: string): Promise<void> {
+    try {
+      const result = await window.fakeDb.openRecentDatabase(nextFilePath)
+
+      if (result.error) {
+        setStatusMessage(result.error)
+        await refreshRecentFiles()
+        return
+      }
+
+      if (!result.content) {
+        setStatusMessage('Unable to open recent database')
+        await refreshRecentFiles()
+        return
+      }
+
+      applyOpenedDatabase(result.content, result.filePath ?? nextFilePath)
+      await refreshRecentFiles()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))
     }
@@ -270,6 +319,7 @@ function App(): JSX.Element {
 
     if (result.success) {
       setHasUnsavedChanges(false)
+      await refreshRecentFiles()
 
       if (persistedContent.fallbackToFakeDb) {
         setSourceFormat('fakeDb')
@@ -299,6 +349,7 @@ function App(): JSX.Element {
     if (result.success && result.filePath) {
       setFilePath(result.filePath)
       setHasUnsavedChanges(false)
+      await refreshRecentFiles()
 
       if (persistedContent.fallbackToFakeDb) {
         setSourceFormat('fakeDb')
@@ -1023,6 +1074,7 @@ function App(): JSX.Element {
         <Sidebar
           displayedFilePath={displayedFilePath}
           sourceFormatLabel={getSourceFormatLabel(sourceFormat)}
+          recentFiles={recentFiles}
           schemas={schemas}
           selectedSchema={selectedSchema}
           selectedTable={selectedTable}
@@ -1037,6 +1089,9 @@ function App(): JSX.Element {
           onDeleteSchema={() => openDeleteSchemaDialog()}
           onRenameTable={() => openRenameTableDialog()}
           onDeleteTable={() => openDeleteTableDialog()}
+          onOpenRecentFile={(nextFilePath) =>
+            requestPendingChangesConfirmation(() => handleOpenRecentDatabase(nextFilePath))
+          }
         />
 
         <section className="workspace">

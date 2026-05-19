@@ -1,6 +1,7 @@
 type SidebarProps = {
   displayedFilePath: string
   sourceFormatLabel: string
+  recentFiles: string[]
   schemas: string[]
   selectedSchema: string
   selectedTable: string
@@ -19,11 +20,13 @@ type SidebarProps = {
   onDeleteSchema: () => void
   onRenameTable: () => void
   onDeleteTable: () => void
+  onOpenRecentFile: (filePath: string) => void
 }
 
 function Sidebar({
   displayedFilePath,
   sourceFormatLabel,
+  recentFiles,
   schemas,
   selectedSchema,
   selectedTable,
@@ -37,7 +40,8 @@ function Sidebar({
   onRenameSchema,
   onDeleteSchema,
   onRenameTable,
-  onDeleteTable
+  onDeleteTable,
+  onOpenRecentFile
 }: SidebarProps): React.JSX.Element {
   return (
     <aside className="sidebar">
@@ -50,6 +54,29 @@ function Sidebar({
         </div>
         <div className="connection-format">Format: {sourceFormatLabel}</div>
       </div>
+
+      {recentFiles.length > 0 && (
+        <>
+          <div className="sidebar-title">RECENT FILES</div>
+
+          <div className="sidebar-action-group">
+            <div className="table-list">
+              {recentFiles.map((recentFile) => (
+                <button
+                  key={recentFile}
+                  className="table-name"
+                  onClick={() => onOpenRecentFile(recentFile)}
+                >
+                  <span className="table-icon">↺</span>
+                  <span className="connection-path" title={recentFile}>
+                    {recentFile}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="sidebar-title">SCHEMAS</div>
 
