@@ -612,3 +612,52 @@ button:disabled:hover {
   color: #94a3b8;
   font-size: 12px;
 }
+
+.data-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  height: 100%;
+}
+
+.data-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-filter-input {
+  width: min(360px, 100%);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #020617;
+  color: #e5e7eb;
+  outline: none;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.table-filter-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+}
+
+.table-filter-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.data-toolbar-info {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-right: auto;
+}
+
+.query-empty-result {
+  border: 1px dashed #334155;
+  border-radius: 12px;
+  padding: 18px;
+  color: #94a3b8;
+  font-size: 13px;
+  background: rgba(15, 23, 42, 0.45);
+}

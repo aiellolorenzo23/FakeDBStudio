@@ -343,6 +343,7 @@ function App(): JSX.Element {
   const [queryResultRows, setQueryResultRows] = useState<TableRow[]>([])
   const [queryError, setQueryError] = useState<string | null>(null)
   const [queryHasRun, setQueryHasRun] = useState(false)
+  const [tableFilter, setTableFilter] = useState('')
 
   const schemas = Object.keys(db.schemas)
 
@@ -357,12 +358,33 @@ function App(): JSX.Element {
 
   const columns = useMemo(() => inferColumns(rows), [rows])
   const queryResultColumns = useMemo(() => inferColumns(queryResultRows), [queryResultRows])
+  const filteredRows = useMemo(() => {
+    const normalizedFilter = tableFilter.trim().toLowerCase()
+
+    const indexedRows = rows.map((row, originalIndex) => ({
+      row,
+      originalIndex
+    }))
+
+    if (!normalizedFilter) {
+      return indexedRows
+    }
+
+    return indexedRows.filter(({ row }) =>
+      columns.some((column) => stringifyValue(row[column]).toLowerCase().includes(normalizedFilter))
+    )
+  }, [rows, columns, tableFilter])
 
   useEffect(() => {
     setRawJsonText(JSON.stringify(rows, null, 2))
     setRawJsonError(null)
     setIsRawDirty(false)
   }, [selectedSchema, selectedTable, rows])
+
+  useEffect(() => {
+    setTableFilter('')
+    setSelectedRowIndex(null)
+  }, [selectedSchema, selectedTable])
 
   function updateCurrentTable(nextRows: TableRow[]): void {
     setDb((currentDb) => ({
@@ -1122,6 +1144,7 @@ function App(): JSX.Element {
               </h2>
               <p>
                 {rows.length} rows · {columns.length} columns
+                {tableFilter.trim() && <> · filtered {filteredRows.length}</>}
                 {selectedRowIndex !== null && <> · selected row #{selectedRowIndex + 1}</>}
               </p>
             </div>
@@ -1179,50 +1202,80 @@ function App(): JSX.Element {
 
           <div className="panel">
             {activeTab === 'data' && (
-              <div className="table-wrapper">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th className="row-number">#</th>
-                      {columns.map((column) => (
-                        <th key={column}>{column}</th>
-                      ))}
-                    </tr>
-                  </thead>
+              <div className="data-panel">
+                <div className="data-toolbar">
+                  <input
+                    className="table-filter-input"
+                    value={tableFilter}
+                    placeholder="Search rows..."
+                    onChange={(event) => setTableFilter(event.target.value)}
+                    disabled={!selectedTable || rows.length === 0}
+                  />
 
-                  <tbody>
-                    {rows.map((row, rowIndex) => (
-                      <tr
-                        key={rowIndex}
-                        className={selectedRowIndex === rowIndex ? 'selected-row' : ''}
-                        onClick={() => setSelectedRowIndex(rowIndex)}
-                      >
-                        <td className="row-number">{rowIndex + 1}</td>
+                  <div className="data-toolbar-info">
+                    {tableFilter.trim()
+                      ? `${filteredRows.length} of ${rows.length} row(s)`
+                      : `${rows.length} row(s)`}
+                  </div>
 
+                  {tableFilter.trim() && (
+                    <button onClick={() => setTableFilter('')}>Clear Filter</button>
+                  )}
+                </div>
+
+                <div className="table-wrapper">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="row-number">#</th>
                         {columns.map((column) => (
-                          <td key={column}>
-                            <input
-                              className="cell-input"
-                              value={stringifyValue(row[column])}
-                              onChange={(event) =>
-                                handleCellChange(rowIndex, column, event.target.value)
-                              }
-                              onFocus={() => setSelectedRowIndex(rowIndex)}
-                            />
-                          </td>
+                          <th key={column}>{column}</th>
                         ))}
                       </tr>
-                    ))}
+                    </thead>
 
-                    {rows.length === 0 && (
-                      <tr>
-                        <td colSpan={columns.length + 1} className="empty-cell">
-                          Empty table. Click “+ Row” to create the first record.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                    <tbody>
+                      {filteredRows.map(({ row, originalIndex }) => (
+                        <tr
+                          key={originalIndex}
+                          className={selectedRowIndex === originalIndex ? 'selected-row' : ''}
+                          onClick={() => setSelectedRowIndex(originalIndex)}
+                        >
+                          <td className="row-number">{originalIndex + 1}</td>
+
+                          {columns.map((column) => (
+                            <td key={column}>
+                              <input
+                                className="cell-input"
+                                value={stringifyValue(row[column])}
+                                onChange={(event) =>
+                                  handleCellChange(originalIndex, column, event.target.value)
+                                }
+                                onFocus={() => setSelectedRowIndex(originalIndex)}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+
+                      {rows.length === 0 && (
+                        <tr>
+                          <td colSpan={columns.length + 1} className="empty-cell">
+                            Empty table. Click “+ Row” to create the first record.
+                          </td>
+                        </tr>
+                      )}
+
+                      {rows.length > 0 && filteredRows.length === 0 && (
+                        <tr>
+                          <td colSpan={columns.length + 1} className="empty-cell">
+                            No rows matched the current filter.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
