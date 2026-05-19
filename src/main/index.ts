@@ -47,8 +47,10 @@ async function removeRecentFile(filePath: string): Promise<void> {
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 760,
+    width: 1440,
+    height: 860,
+    minWidth: 1320,
+    minHeight: 820,
     show: false,
     title: 'FakeDB Studio',
     icon,
