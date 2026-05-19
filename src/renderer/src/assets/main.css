@@ -167,6 +167,7 @@ button:disabled:hover {
   border: 1px solid #334155;
   border-radius: 12px;
   background: rgba(30, 41, 59, 0.7);
+  overflow: hidden;
 }
 
 .connection-name {
@@ -175,9 +176,15 @@ button:disabled:hover {
 }
 
 .connection-path {
-  margin-top: 4px;
+  margin-top: 6px;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
 }
 
 .schema-tree {

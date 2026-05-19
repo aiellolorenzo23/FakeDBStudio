@@ -1153,6 +1153,8 @@ function App(): JSX.Element {
     })
   }
 
+  const displayedFilePath = filePath ?? 'mock://database.json'
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1187,7 +1189,9 @@ function App(): JSX.Element {
 
           <div className="connection-card">
             <div className="connection-name">Local JSON File</div>
-            <div className="connection-path">{filePath ?? 'mock://database.json'}</div>
+            <div className="connection-path" title={displayedFilePath}>
+              {displayedFilePath}
+            </div>
           </div>
 
           <div className="sidebar-title">SCHEMAS</div>
