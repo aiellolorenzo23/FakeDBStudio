@@ -1,10 +1,11 @@
-import { JSX, useEffect, useMemo, useState } from 'react'
+import { JSX, useMemo, useState } from 'react'
 import { mockDb } from './mock/mockDb'
 import type { FakeDb, JsonValue, TableRow } from './model/fakeDb'
 import logoImage from './assets/brand/logo.png'
 import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
 type Tab = 'data' | 'structure' | 'raw' | 'query'
+type DialogMode = 'schema' | 'table' | null
 
 function stringifyValue(value: JsonValue | undefined): string {
   if (value === undefined) return ''
@@ -103,6 +104,53 @@ function cloneRow(row: TableRow): TableRow {
   return JSON.parse(JSON.stringify(row)) as TableRow
 }
 
+function normalizeIdentifier(value: string): string {
+  return value.trim().replace(/\s+/g, '_')
+}
+
+function parseColumnNames(value: string): string[] {
+  return value
+    .split(',')
+    .map((column) => normalizeIdentifier(column))
+    .filter((column) => column.length > 0)
+}
+
+function getDefaultValueForNewColumn(column: string): JsonValue {
+  const normalizedColumn = column.toLowerCase()
+
+  if (normalizedColumn === 'id') return 1
+
+  if (
+    normalizedColumn.startsWith('is') ||
+    normalizedColumn.startsWith('has') ||
+    normalizedColumn === 'active' ||
+    normalizedColumn === 'enabled' ||
+    normalizedColumn === 'visible'
+  ) {
+    return false
+  }
+
+  if (
+    normalizedColumn.endsWith('count') ||
+    normalizedColumn.endsWith('number') ||
+    normalizedColumn.endsWith('amount') ||
+    normalizedColumn.endsWith('total') ||
+    normalizedColumn === 'age' ||
+    normalizedColumn === 'price'
+  ) {
+    return 0
+  }
+
+  return ''
+}
+
+function createInitialRowFromColumns(columns: string[]): TableRow {
+  return columns.reduce<TableRow>((row, column) => {
+    row[column] = getDefaultValueForNewColumn(column)
+    return row
+  }, {})
+}
+
 function App(): JSX.Element {
   const [db, setDb] = useState<FakeDb>(mockDb)
   const [selectedSchema, setSelectedSchema] = useState('main')
@@ -113,6 +161,10 @@ function App(): JSX.Element {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('Valid JSON')
+  const [dialogMode, setDialogMode] = useState<DialogMode>(null)
+  const [schemaNameInput, setSchemaNameInput] = useState('')
+  const [tableNameInput, setTableNameInput] = useState('')
+  const [columnsInput, setColumnsInput] = useState('id,name')
 
   const schemas = Object.keys(db.schemas)
 
@@ -126,10 +178,6 @@ function App(): JSX.Element {
   }, [db, selectedSchema, selectedTable])
 
   const columns = useMemo(() => inferColumns(rows), [rows])
-
-  useEffect(() => {
-    setSelectedRowIndex(null)
-  }, [selectedSchema, selectedTable])
 
   function updateCurrentTable(nextRows: TableRow[]): void {
     setDb((currentDb) => ({
@@ -151,6 +199,12 @@ function App(): JSX.Element {
 
     setSelectedSchema(schemaName)
     setSelectedTable(schemaTables[0] ?? '')
+    setSelectedRowIndex(null)
+  }
+
+  function handleTableClick(tableName: string): void {
+    setSelectedTable(tableName)
+    setSelectedRowIndex(null)
   }
 
   function handleCellChange(rowIndex: number, column: string, rawValue: string): void {
@@ -300,6 +354,90 @@ function App(): JSX.Element {
     setStatusMessage('New database created')
   }
 
+  function openCreateSchemaDialog(): void {
+    setSchemaNameInput('new_schema')
+    setDialogMode('schema')
+  }
+
+  function handleCreateSchema(): void {
+    const schemaName = normalizeIdentifier(schemaNameInput)
+
+    if (!schemaName) {
+      setStatusMessage('Schema name cannot be empty')
+      return
+    }
+
+    if (db.schemas[schemaName]) {
+      setStatusMessage(`Schema "${schemaName}" already exists`)
+      return
+    }
+
+    setDb((currentDb) => ({
+      ...currentDb,
+      schemas: {
+        ...currentDb.schemas,
+        [schemaName]: {}
+      }
+    }))
+
+    setSelectedSchema(schemaName)
+    setSelectedTable('')
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Schema "${schemaName}" created`)
+    setDialogMode(null)
+  }
+
+  function openCreateTableDialog(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select or create a schema first')
+      return
+    }
+
+    setTableNameInput('new_table')
+    setColumnsInput('id,name')
+    setDialogMode('table')
+  }
+
+  function handleCreateTable(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select or create a schema first')
+      return
+    }
+
+    const tableName = normalizeIdentifier(tableNameInput)
+
+    if (!tableName) {
+      setStatusMessage('Table name cannot be empty')
+      return
+    }
+
+    if (db.schemas[selectedSchema]?.[tableName]) {
+      setStatusMessage(`Table "${tableName}" already exists in schema "${selectedSchema}"`)
+      return
+    }
+
+    const columnNames = parseColumnNames(columnsInput)
+    const initialRows = columnNames.length > 0 ? [createInitialRowFromColumns(columnNames)] : []
+
+    setDb((currentDb) => ({
+      ...currentDb,
+      schemas: {
+        ...currentDb.schemas,
+        [selectedSchema]: {
+          ...currentDb.schemas[selectedSchema],
+          [tableName]: initialRows
+        }
+      }
+    }))
+
+    setSelectedTable(tableName)
+    setSelectedRowIndex(initialRows.length > 0 ? 0 : null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Table "${tableName}" created in schema "${selectedSchema}"`)
+    setDialogMode(null)
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -318,7 +456,9 @@ function App(): JSX.Element {
 
           <button onClick={() => void handleSaveDatabaseAs()}>Save As</button>
 
-          <button className="primary">New Schema</button>
+          <button className="primary" onClick={openCreateSchemaDialog}>
+            New Schema
+          </button>
         </div>
       </header>
 
@@ -351,7 +491,7 @@ function App(): JSX.Element {
                         className={
                           selectedTable === tableName ? 'table-name selected' : 'table-name'
                         }
-                        onClick={() => setSelectedTable(tableName)}
+                        onClick={() => handleTableClick(tableName)}
                       >
                         <span className="table-icon">▦</span>
                         {tableName}
@@ -364,8 +504,11 @@ function App(): JSX.Element {
           </div>
 
           <div className="sidebar-actions">
-            <button>+ Schema</button>
-            <button>+ Table</button>
+            <button onClick={openCreateSchemaDialog}>+ Schema</button>
+
+            <button onClick={openCreateTableDialog} disabled={!selectedSchema}>
+              + Table
+            </button>
           </div>
         </aside>
 
@@ -382,7 +525,9 @@ function App(): JSX.Element {
             </div>
 
             <div className="workspace-actions">
-              <button onClick={handleAddRow}>+ Row</button>
+              <button onClick={handleAddRow} disabled={!selectedTable}>
+                + Row
+              </button>
               <button onClick={handleDuplicateRow} disabled={selectedRowIndex === null}>
                 Duplicate
               </button>
@@ -542,6 +687,107 @@ function App(): JSX.Element {
           </div>
         </section>
       </main>
+
+      {dialogMode !== null && (
+        <div className="modal-backdrop" onClick={() => setDialogMode(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            {dialogMode === 'schema' && (
+              <>
+                <div className="modal-header">
+                  <h3>Create Schema</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <label className="field-label" htmlFor="schema-name">
+                    Schema name
+                  </label>
+
+                  <input
+                    id="schema-name"
+                    className="modal-input"
+                    value={schemaNameInput}
+                    autoFocus
+                    onChange={(event) => setSchemaNameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleCreateSchema()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleCreateSchema}>
+                    Create Schema
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'table' && (
+              <>
+                <div className="modal-header">
+                  <h3>Create Table</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="modal-info">
+                    Schema: <strong>{selectedSchema}</strong>
+                  </div>
+
+                  <label className="field-label" htmlFor="table-name">
+                    Table name
+                  </label>
+
+                  <input
+                    id="table-name"
+                    className="modal-input"
+                    value={tableNameInput}
+                    autoFocus
+                    onChange={(event) => setTableNameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+
+                  <label className="field-label" htmlFor="table-columns">
+                    Columns
+                  </label>
+
+                  <input
+                    id="table-columns"
+                    className="modal-input"
+                    value={columnsInput}
+                    placeholder="id,name,active"
+                    onChange={(event) => setColumnsInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleCreateTable()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+
+                  <div className="modal-hint">
+                    Separate columns with comma, example: <code>id,name,surname,active</code>
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleCreateTable}>
+                    Create Table
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <footer className="statusbar">
         <span>Status: {statusMessage}</span>
