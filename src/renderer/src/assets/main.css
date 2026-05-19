@@ -504,3 +504,59 @@ button:disabled:hover {
   border-top: 1px solid #243244;
   background: rgba(15, 23, 42, 0.72);
 }
+
+.raw-panel {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
+  height: 100%;
+}
+
+.raw-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.raw-actions-left,
+.raw-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.raw-dirty-indicator {
+  color: #facc15;
+  font-size: 12px;
+}
+
+.raw-error {
+  color: #f87171;
+  font-size: 12px;
+}
+
+.raw-editor-error {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12);
+}
+
+.danger-box {
+  border: 1px solid rgba(248, 113, 113, 0.36);
+  border-radius: 12px;
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.danger-button {
+  border-color: #ef4444;
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.danger-button:hover {
+  background: #991b1b;
+}

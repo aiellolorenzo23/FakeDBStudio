@@ -1,11 +1,19 @@
-import { JSX, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { JSX } from 'react'
 import { mockDb } from './mock/mockDb'
 import type { FakeDb, JsonValue, TableRow } from './model/fakeDb'
 import logoImage from './assets/brand/logo.png'
 import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
 type Tab = 'data' | 'structure' | 'raw' | 'query'
-type DialogMode = 'schema' | 'table' | null
+type DialogMode =
+  | 'schema'
+  | 'table'
+  | 'renameSchema'
+  | 'deleteSchema'
+  | 'renameTable'
+  | 'deleteTable'
+  | null
 
 function stringifyValue(value: JsonValue | undefined): string {
   if (value === undefined) return ''
@@ -151,6 +159,14 @@ function createInitialRowFromColumns(columns: string[]): TableRow {
   }, {})
 }
 
+function isRawTableRow(value: unknown): value is TableRow {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isRawTable(value: unknown): value is TableRow[] {
+  return Array.isArray(value) && value.every(isRawTableRow)
+}
+
 function App(): JSX.Element {
   const [db, setDb] = useState<FakeDb>(mockDb)
   const [selectedSchema, setSelectedSchema] = useState('main')
@@ -165,6 +181,10 @@ function App(): JSX.Element {
   const [schemaNameInput, setSchemaNameInput] = useState('')
   const [tableNameInput, setTableNameInput] = useState('')
   const [columnsInput, setColumnsInput] = useState('id,name')
+  const [renameInput, setRenameInput] = useState('')
+  const [rawJsonText, setRawJsonText] = useState('')
+  const [rawJsonError, setRawJsonError] = useState<string | null>(null)
+  const [isRawDirty, setIsRawDirty] = useState(false)
 
   const schemas = Object.keys(db.schemas)
 
@@ -178,6 +198,12 @@ function App(): JSX.Element {
   }, [db, selectedSchema, selectedTable])
 
   const columns = useMemo(() => inferColumns(rows), [rows])
+
+  useEffect(() => {
+    setRawJsonText(JSON.stringify(rows, null, 2))
+    setRawJsonError(null)
+    setIsRawDirty(false)
+  }, [selectedSchema, selectedTable, rows])
 
   function updateCurrentTable(nextRows: TableRow[]): void {
     setDb((currentDb) => ({
@@ -438,6 +464,256 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
+  function openRenameSchemaDialog(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select a schema first')
+      return
+    }
+
+    setRenameInput(selectedSchema)
+    setDialogMode('renameSchema')
+  }
+
+  function handleRenameSchema(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select a schema first')
+      return
+    }
+
+    const nextSchemaName = normalizeIdentifier(renameInput)
+
+    if (!nextSchemaName) {
+      setStatusMessage('Schema name cannot be empty')
+      return
+    }
+
+    if (nextSchemaName === selectedSchema) {
+      setDialogMode(null)
+      return
+    }
+
+    if (db.schemas[nextSchemaName]) {
+      setStatusMessage(`Schema "${nextSchemaName}" already exists`)
+      return
+    }
+
+    setDb((currentDb) => {
+      const nextSchemas = Object.entries(currentDb.schemas).reduce<FakeDb['schemas']>(
+        (acc, [schemaName, schema]) => {
+          acc[schemaName === selectedSchema ? nextSchemaName : schemaName] = schema
+          return acc
+        },
+        {}
+      )
+
+      return {
+        ...currentDb,
+        schemas: nextSchemas
+      }
+    })
+
+    setSelectedSchema(nextSchemaName)
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Schema "${selectedSchema}" renamed to "${nextSchemaName}"`)
+    setDialogMode(null)
+  }
+
+  function openDeleteSchemaDialog(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select a schema first')
+      return
+    }
+
+    setDialogMode('deleteSchema')
+  }
+
+  function handleDeleteSchema(): void {
+    if (!selectedSchema) {
+      setStatusMessage('Select a schema first')
+      return
+    }
+
+    const schemaToDelete = selectedSchema
+    const remainingSchemaNames = Object.keys(db.schemas).filter(
+      (schemaName) => schemaName !== schemaToDelete
+    )
+    const nextSelectedSchema = remainingSchemaNames[0] ?? 'main'
+    const nextSelectedTable =
+      remainingSchemaNames.length > 0
+        ? (Object.keys(db.schemas[nextSelectedSchema] ?? {})[0] ?? '')
+        : ''
+
+    setDb((currentDb) => {
+      const nextSchemas = { ...currentDb.schemas }
+
+      delete nextSchemas[schemaToDelete]
+
+      if (Object.keys(nextSchemas).length === 0) {
+        nextSchemas.main = {}
+      }
+
+      return {
+        ...currentDb,
+        schemas: nextSchemas
+      }
+    })
+
+    setSelectedSchema(nextSelectedSchema)
+    setSelectedTable(nextSelectedTable)
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Schema "${schemaToDelete}" deleted`)
+    setDialogMode(null)
+  }
+
+  function openRenameTableDialog(): void {
+    if (!selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    setRenameInput(selectedTable)
+    setDialogMode('renameTable')
+  }
+
+  function handleRenameTable(): void {
+    if (!selectedSchema || !selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    const nextTableName = normalizeIdentifier(renameInput)
+
+    if (!nextTableName) {
+      setStatusMessage('Table name cannot be empty')
+      return
+    }
+
+    if (nextTableName === selectedTable) {
+      setDialogMode(null)
+      return
+    }
+
+    if (db.schemas[selectedSchema]?.[nextTableName]) {
+      setStatusMessage(`Table "${nextTableName}" already exists in schema "${selectedSchema}"`)
+      return
+    }
+
+    setDb((currentDb) => {
+      const currentSchema = currentDb.schemas[selectedSchema] ?? {}
+
+      const nextSchema = Object.entries(currentSchema).reduce<Record<string, TableRow[]>>(
+        (acc, [tableName, tableRows]) => {
+          acc[tableName === selectedTable ? nextTableName : tableName] = tableRows
+          return acc
+        },
+        {}
+      )
+
+      return {
+        ...currentDb,
+        schemas: {
+          ...currentDb.schemas,
+          [selectedSchema]: nextSchema
+        }
+      }
+    })
+
+    setSelectedTable(nextTableName)
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Table "${selectedTable}" renamed to "${nextTableName}"`)
+    setDialogMode(null)
+  }
+
+  function openDeleteTableDialog(): void {
+    if (!selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    setDialogMode('deleteTable')
+  }
+
+  function handleDeleteTable(): void {
+    if (!selectedSchema || !selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    const tableToDelete = selectedTable
+    const remainingTableNames = Object.keys(db.schemas[selectedSchema] ?? {}).filter(
+      (tableName) => tableName !== tableToDelete
+    )
+    const nextSelectedTable = remainingTableNames[0] ?? ''
+
+    setDb((currentDb) => {
+      const nextSchema = { ...(currentDb.schemas[selectedSchema] ?? {}) }
+
+      delete nextSchema[tableToDelete]
+
+      return {
+        ...currentDb,
+        schemas: {
+          ...currentDb.schemas,
+          [selectedSchema]: nextSchema
+        }
+      }
+    })
+
+    setSelectedTable(nextSelectedTable)
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage(`Table "${tableToDelete}" deleted`)
+    setDialogMode(null)
+  }
+
+  function handleRawJsonChange(value: string): void {
+    setRawJsonText(value)
+    setRawJsonError(null)
+    setIsRawDirty(true)
+  }
+
+  function handleFormatRawJson(): void {
+    try {
+      const parsed = JSON.parse(rawJsonText) as unknown
+
+      setRawJsonText(JSON.stringify(parsed, null, 2))
+      setRawJsonError(null)
+      setStatusMessage('Raw JSON formatted')
+    } catch (error) {
+      setRawJsonError(error instanceof Error ? error.message : String(error))
+      setStatusMessage('Invalid raw JSON')
+    }
+  }
+
+  function handleResetRawJson(): void {
+    setRawJsonText(JSON.stringify(rows, null, 2))
+    setRawJsonError(null)
+    setIsRawDirty(false)
+    setStatusMessage('Raw JSON reset')
+  }
+
+  function handleApplyRawJson(): void {
+    try {
+      const parsed = JSON.parse(rawJsonText) as unknown
+
+      if (!isRawTable(parsed)) {
+        throw new Error('Table Raw JSON must be an array of objects.')
+      }
+
+      updateCurrentTable(parsed)
+      setRawJsonText(JSON.stringify(parsed, null, 2))
+      setRawJsonError(null)
+      setIsRawDirty(false)
+      setStatusMessage('Raw JSON applied to current table')
+    } catch (error) {
+      setRawJsonError(error instanceof Error ? error.message : String(error))
+      setStatusMessage('Invalid raw JSON')
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -508,6 +784,26 @@ function App(): JSX.Element {
 
             <button onClick={openCreateTableDialog} disabled={!selectedSchema}>
               + Table
+            </button>
+          </div>
+
+          <div className="sidebar-actions">
+            <button onClick={openRenameSchemaDialog} disabled={!selectedSchema}>
+              Rename Schema
+            </button>
+
+            <button onClick={openDeleteSchemaDialog} disabled={!selectedSchema}>
+              Delete Schema
+            </button>
+          </div>
+
+          <div className="sidebar-actions">
+            <button onClick={openRenameTableDialog} disabled={!selectedTable}>
+              Rename Table
+            </button>
+
+            <button onClick={openDeleteTableDialog} disabled={!selectedTable}>
+              Delete Table
             </button>
           </div>
         </aside>
@@ -662,7 +958,35 @@ function App(): JSX.Element {
             )}
 
             {activeTab === 'raw' && (
-              <textarea className="raw-editor" value={JSON.stringify(rows, null, 2)} readOnly />
+              <div className="raw-panel">
+                <textarea
+                  className={rawJsonError ? 'raw-editor raw-editor-error' : 'raw-editor'}
+                  value={rawJsonText}
+                  onChange={(event) => handleRawJsonChange(event.target.value)}
+                  spellCheck={false}
+                />
+
+                <div className="raw-actions">
+                  <div className="raw-actions-left">
+                    {isRawDirty && (
+                      <span className="raw-dirty-indicator">Raw JSON not applied</span>
+                    )}
+                    {rawJsonError && <span className="raw-error">{rawJsonError}</span>}
+                  </div>
+
+                  <div className="raw-actions-right">
+                    <button onClick={handleResetRawJson} disabled={!isRawDirty}>
+                      Reset
+                    </button>
+
+                    <button onClick={handleFormatRawJson}>Format</button>
+
+                    <button className="primary" onClick={handleApplyRawJson} disabled={!isRawDirty}>
+                      Apply Raw
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {activeTab === 'query' && (
@@ -781,6 +1105,142 @@ function App(): JSX.Element {
                   <button onClick={() => setDialogMode(null)}>Cancel</button>
                   <button className="primary" onClick={handleCreateTable}>
                     Create Table
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'renameSchema' && (
+              <>
+                <div className="modal-header">
+                  <h3>Rename Schema</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="modal-info">
+                    Current schema: <strong>{selectedSchema}</strong>
+                  </div>
+
+                  <label className="field-label" htmlFor="rename-schema">
+                    New schema name
+                  </label>
+
+                  <input
+                    id="rename-schema"
+                    className="modal-input"
+                    value={renameInput}
+                    autoFocus
+                    onChange={(event) => setRenameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleRenameSchema()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleRenameSchema}>
+                    Rename Schema
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'deleteSchema' && (
+              <>
+                <div className="modal-header">
+                  <h3>Delete Schema</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="danger-box">
+                    You are about to delete schema <strong>{selectedSchema}</strong> and all its
+                    tables.
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="danger-button" onClick={handleDeleteSchema}>
+                    Delete Schema
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'renameTable' && (
+              <>
+                <div className="modal-header">
+                  <h3>Rename Table</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="modal-info">
+                    Current table:{' '}
+                    <strong>
+                      {selectedSchema}.{selectedTable}
+                    </strong>
+                  </div>
+
+                  <label className="field-label" htmlFor="rename-table">
+                    New table name
+                  </label>
+
+                  <input
+                    id="rename-table"
+                    className="modal-input"
+                    value={renameInput}
+                    autoFocus
+                    onChange={(event) => setRenameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleRenameTable()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleRenameTable}>
+                    Rename Table
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'deleteTable' && (
+              <>
+                <div className="modal-header">
+                  <h3>Delete Table</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="danger-box">
+                    You are about to delete table{' '}
+                    <strong>
+                      {selectedSchema}.{selectedTable}
+                    </strong>
+                    .
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="danger-button" onClick={handleDeleteTable}>
+                    Delete Table
                   </button>
                 </div>
               </>
