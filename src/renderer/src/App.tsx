@@ -1,8 +1,34 @@
 import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
-import { mockDb } from './mock/mockDb'
-import type { FakeDb, JsonValue, TableRow } from './model/fakeDb'
 import logoImage from './assets/brand/logo.png'
+import Sidebar from './components/Sidebar'
+import StatusBar from './components/StatusBar'
+import WorkspaceHeader from './components/WorkspaceHeader'
+import QueryPanel from './features/query/QueryPanel'
+import RawJsonPanel from './features/raw/RawJsonPanel'
+import StructurePanel from './features/structure/StructurePanel'
+import { mockDb } from './mock/mockDb'
+import {
+  buildPersistedDatabaseContent,
+  detectSourceFormat,
+  getSourceFormatLabel
+} from './lib/fakeDbFormat'
+import { compareValues, parseSelectQuery, projectRow } from './lib/queryEngine'
+import { stringifyValue } from './lib/jsonUtils'
+import { compareSortableValues } from './lib/sorting'
+import {
+  cloneRow,
+  createEmptyRow,
+  createInitialRowFromColumns,
+  getDefaultValueForColumn,
+  inferColumns,
+  isRawTable,
+  normalizeIdentifier,
+  parseCellValue,
+  parseColumnNames
+} from './lib/tableUtils'
+import type { PersistedDatabaseContent, SourceFormat } from './lib/fakeDbFormat'
+import type { FakeDb, TableRow } from './model/fakeDb'
 import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
 type Tab = 'data' | 'structure' | 'raw' | 'query'
@@ -44,461 +70,12 @@ type ContextMenuState =
     }
   | null
 
-type SourceFormat = 'fakeDb' | 'plainObject' | 'rootArray'
-
-type PersistedDatabaseContent = {
-  content: string
-  formatLabel: string
-  fallbackToFakeDb: boolean
-}
-
 type SortDirection = 'asc' | 'desc'
 
 type TableSortState = {
   column: string
   direction: SortDirection
 } | null
-
-function isEmptySortableValue(value: JsonValue | undefined): boolean {
-  return value === undefined || value === null || value === ''
-}
-
-function compareSortableValues(left: JsonValue | undefined, right: JsonValue | undefined): number {
-  const leftIsEmpty = isEmptySortableValue(left)
-  const rightIsEmpty = isEmptySortableValue(right)
-
-  if (leftIsEmpty && rightIsEmpty) return 0
-  if (leftIsEmpty) return 1
-  if (rightIsEmpty) return -1
-
-  if (typeof left === 'number' && typeof right === 'number') {
-    return left - right
-  }
-
-  if (typeof left === 'boolean' && typeof right === 'boolean') {
-    return Number(left) - Number(right)
-  }
-
-  return stringifyValue(left).localeCompare(stringifyValue(right), undefined, {
-    numeric: true,
-    sensitivity: 'base'
-  })
-}
-
-function stringifyValue(value: JsonValue | undefined): string {
-  if (value === undefined) return ''
-  if (value === null) return 'null'
-
-  if (typeof value === 'object') {
-    return JSON.stringify(value)
-  }
-
-  return String(value)
-}
-
-function parseCellValue(rawValue: string): JsonValue {
-  const value = rawValue.trim()
-
-  if (value === '') return ''
-  if (value === 'null') return null
-  if (value === 'true') return true
-  if (value === 'false') return false
-
-  if (!Number.isNaN(Number(value)) && value !== '') {
-    return Number(value)
-  }
-
-  if (
-    (value.startsWith('{') && value.endsWith('}')) ||
-    (value.startsWith('[') && value.endsWith(']'))
-  ) {
-    try {
-      return JSON.parse(value) as JsonValue
-    } catch {
-      return rawValue
-    }
-  }
-
-  return rawValue
-}
-
-function inferColumns(rows: TableRow[]): string[] {
-  const columns = new Set<string>()
-
-  rows.forEach((row) => {
-    Object.keys(row).forEach((key) => columns.add(key))
-  })
-
-  return Array.from(columns)
-}
-
-function inferType(values: Array<JsonValue | undefined>): string {
-  const types = new Set(
-    values.map((value) => {
-      if (value === undefined) return 'undefined'
-      if (value === null) return 'null'
-      if (Array.isArray(value)) return 'array'
-      return typeof value
-    })
-  )
-
-  return Array.from(types).join(' | ')
-}
-
-function getDefaultValueForColumn(rows: TableRow[], column: string): JsonValue {
-  const existingValue = rows.find((row) => row[column] !== undefined)?.[column]
-
-  if (column.toLowerCase() === 'id') {
-    const maxId = rows.reduce((max, row) => {
-      const id = row[column]
-      return typeof id === 'number' && id > max ? id : max
-    }, 0)
-
-    return maxId + 1
-  }
-
-  if (typeof existingValue === 'number') return 0
-  if (typeof existingValue === 'boolean') return false
-  if (Array.isArray(existingValue)) return []
-  if (existingValue !== null && typeof existingValue === 'object') return {}
-
-  return ''
-}
-
-function createEmptyRow(rows: TableRow[], columns: string[]): TableRow {
-  if (columns.length === 0) {
-    return {
-      id: 1
-    }
-  }
-
-  return columns.reduce<TableRow>((row, column) => {
-    row[column] = getDefaultValueForColumn(rows, column)
-    return row
-  }, {})
-}
-
-function cloneRow(row: TableRow): TableRow {
-  return JSON.parse(JSON.stringify(row)) as TableRow
-}
-
-function normalizeIdentifier(value: string): string {
-  return value.trim().replace(/\s+/g, '_')
-}
-
-function parseColumnNames(value: string): string[] {
-  return value
-    .split(',')
-    .map((column) => normalizeIdentifier(column))
-    .filter((column) => column.length > 0)
-}
-
-function getDefaultValueForNewColumn(column: string): JsonValue {
-  const normalizedColumn = column.toLowerCase()
-
-  if (normalizedColumn === 'id') return 1
-
-  if (
-    normalizedColumn.startsWith('is') ||
-    normalizedColumn.startsWith('has') ||
-    normalizedColumn === 'active' ||
-    normalizedColumn === 'enabled' ||
-    normalizedColumn === 'visible'
-  ) {
-    return false
-  }
-
-  if (
-    normalizedColumn.endsWith('count') ||
-    normalizedColumn.endsWith('number') ||
-    normalizedColumn.endsWith('amount') ||
-    normalizedColumn.endsWith('total') ||
-    normalizedColumn === 'age' ||
-    normalizedColumn === 'price'
-  ) {
-    return 0
-  }
-
-  return ''
-}
-
-function createInitialRowFromColumns(columns: string[]): TableRow {
-  return columns.reduce<TableRow>((row, column) => {
-    row[column] = getDefaultValueForNewColumn(column)
-    return row
-  }, {})
-}
-
-function isRawTableRow(value: unknown): value is TableRow {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isRawTable(value: unknown): value is TableRow[] {
-  return Array.isArray(value) && value.every(isRawTableRow)
-}
-
-function detectSourceFormat(value: unknown): SourceFormat {
-  if (Array.isArray(value)) {
-    return 'rootArray'
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const objectValue = value as Record<string, unknown>
-
-    if (
-      typeof objectValue.version === 'string' &&
-      typeof objectValue.schemas === 'object' &&
-      objectValue.schemas !== null &&
-      !Array.isArray(objectValue.schemas)
-    ) {
-      return 'fakeDb'
-    }
-
-    return 'plainObject'
-  }
-
-  return 'fakeDb'
-}
-
-function getSourceFormatLabel(sourceFormat: SourceFormat): string {
-  if (sourceFormat === 'fakeDb') return 'FakeDB'
-  if (sourceFormat === 'plainObject') return 'Plain JSON object'
-  if (sourceFormat === 'rootArray') return 'Root JSON array'
-
-  return 'Unknown'
-}
-
-function canPreserveRootArrayFormat(db: FakeDb): boolean {
-  const schemaNames = Object.keys(db.schemas)
-
-  return (
-    schemaNames.length === 1 &&
-    schemaNames[0] === 'main' &&
-    Object.keys(db.schemas.main ?? {}).length === 1 &&
-    Array.isArray(db.schemas.main?.root)
-  )
-}
-
-function canPreservePlainObjectFormat(db: FakeDb): boolean {
-  const schemaNames = Object.keys(db.schemas)
-
-  return schemaNames.length === 1 && schemaNames[0] === 'main'
-}
-
-function buildPlainObjectFromMainSchema(db: FakeDb): Record<string, JsonValue> {
-  const output: Record<string, JsonValue> = {}
-  const mainSchema = db.schemas.main ?? {}
-
-  Object.entries(mainSchema).forEach(([tableName, tableRows]) => {
-    if (tableName === '_properties') {
-      tableRows.forEach((row) => {
-        const key = row.key
-
-        if (typeof key === 'string' && key.length > 0) {
-          output[key] = row.value ?? null
-        }
-      })
-
-      return
-    }
-
-    output[tableName] = tableRows
-  })
-
-  return output
-}
-
-function buildPersistedDatabaseContent(
-  db: FakeDb,
-  sourceFormat: SourceFormat
-): PersistedDatabaseContent {
-  if (sourceFormat === 'rootArray') {
-    if (canPreserveRootArrayFormat(db)) {
-      return {
-        content: JSON.stringify(db.schemas.main.root, null, 2),
-        formatLabel: 'Root JSON array',
-        fallbackToFakeDb: false
-      }
-    }
-
-    return {
-      content: JSON.stringify(db, null, 2),
-      formatLabel: 'FakeDB',
-      fallbackToFakeDb: true
-    }
-  }
-
-  if (sourceFormat === 'plainObject') {
-    if (canPreservePlainObjectFormat(db)) {
-      return {
-        content: JSON.stringify(buildPlainObjectFromMainSchema(db), null, 2),
-        formatLabel: 'Plain JSON object',
-        fallbackToFakeDb: false
-      }
-    }
-
-    return {
-      content: JSON.stringify(db, null, 2),
-      formatLabel: 'FakeDB',
-      fallbackToFakeDb: true
-    }
-  }
-
-  return {
-    content: JSON.stringify(db, null, 2),
-    formatLabel: 'FakeDB',
-    fallbackToFakeDb: false
-  }
-}
-
-type QueryOperator = '=' | '!=' | '>' | '<' | '>=' | '<='
-
-type SelectedFields = '*' | string[]
-
-type ParsedSelectQuery = {
-  schemaName?: string
-  tableName: string
-  fields: SelectedFields
-  where?: {
-    field: string
-    operator: QueryOperator
-    value: JsonValue
-  }
-}
-
-function parseQueryValue(rawValue: string): JsonValue {
-  const value = rawValue.trim()
-
-  const isSingleQuoted = value.startsWith("'") && value.endsWith("'")
-  const isDoubleQuoted = value.startsWith('"') && value.endsWith('"')
-
-  if (isSingleQuoted || isDoubleQuoted) {
-    return value.slice(1, -1)
-  }
-
-  if (value === 'null') return null
-  if (value === 'true') return true
-  if (value === 'false') return false
-
-  if (!Number.isNaN(Number(value)) && value !== '') {
-    return Number(value)
-  }
-
-  if (
-    (value.startsWith('{') && value.endsWith('}')) ||
-    (value.startsWith('[') && value.endsWith(']'))
-  ) {
-    try {
-      return JSON.parse(value) as JsonValue
-    } catch {
-      return value
-    }
-  }
-
-  return value
-}
-
-function parseSelectQuery(rawQuery: string): ParsedSelectQuery {
-  const normalizedQuery = rawQuery.trim().replace(/\s+/g, ' ')
-
-  const queryMatch = normalizedQuery.match(
-    /^select\s+(.+?)\s+from\s+([a-zA-Z0-9_.-]+)(?:\s+where\s+([a-zA-Z0-9_.-]+)\s*(>=|<=|!=|=|>|<)\s*(.+))?$/i
-  )
-
-  if (!queryMatch) {
-    throw new Error(
-      'Unsupported query. Use: SELECT * FROM table oppure SELECT field1,field2 FROM schema.table WHERE field = value'
-    )
-  }
-
-  const [, rawFields, rawTableRef, rawWhereField, rawOperator, rawWhereValue] = queryMatch
-
-  const tableParts = rawTableRef.split('.')
-
-  if (tableParts.length > 2) {
-    throw new Error('Invalid table reference. Use table or schema.table')
-  }
-
-  const schemaName = tableParts.length === 2 ? tableParts[0] : undefined
-  const tableName = tableParts.length === 2 ? tableParts[1] : tableParts[0]
-
-  const fields =
-    rawFields.trim() === '*'
-      ? '*'
-      : rawFields
-          .split(',')
-          .map((field) => field.trim())
-          .filter((field) => field.length > 0)
-
-  if (fields !== '*' && fields.length === 0) {
-    throw new Error('Select at least one field')
-  }
-
-  return {
-    schemaName,
-    tableName,
-    fields,
-    where:
-      rawWhereField && rawOperator && rawWhereValue
-        ? {
-            field: rawWhereField,
-            operator: rawOperator as QueryOperator,
-            value: parseQueryValue(rawWhereValue)
-          }
-        : undefined
-  }
-}
-
-function areValuesEqual(left: JsonValue | undefined, right: JsonValue): boolean {
-  if (left === undefined) return false
-
-  if (typeof left === 'object' || typeof right === 'object') {
-    return JSON.stringify(left) === JSON.stringify(right)
-  }
-
-  return left === right
-}
-
-function compareValues(
-  left: JsonValue | undefined,
-  operator: QueryOperator,
-  right: JsonValue
-): boolean {
-  if (operator === '=') return areValuesEqual(left, right)
-  if (operator === '!=') return !areValuesEqual(left, right)
-
-  if (left === undefined || left === null || right === null) {
-    return false
-  }
-
-  if (typeof left === 'number' && typeof right === 'number') {
-    if (operator === '>') return left > right
-    if (operator === '<') return left < right
-    if (operator === '>=') return left >= right
-    if (operator === '<=') return left <= right
-  }
-
-  const leftText = String(left)
-  const rightText = String(right)
-
-  if (operator === '>') return leftText > rightText
-  if (operator === '<') return leftText < rightText
-  if (operator === '>=') return leftText >= rightText
-  if (operator === '<=') return leftText <= rightText
-
-  return false
-}
-
-function projectRow(row: TableRow, fields: SelectedFields): TableRow {
-  if (fields === '*') {
-    return cloneRow(row)
-  }
-
-  return fields.reduce<TableRow>((projectedRow, field) => {
-    projectedRow[field] = row[field] ?? null
-    return projectedRow
-  }, {})
-}
 
 function App(): JSX.Element {
   const [db, setDb] = useState<FakeDb>(mockDb)
@@ -595,16 +172,24 @@ function App(): JSX.Element {
   }
 
   function handleSchemaClick(schemaName: string): void {
-    const schemaTables = Object.keys(db.schemas[schemaName] ?? {})
+    const selectSchema = (): void => {
+      const schemaTables = Object.keys(db.schemas[schemaName] ?? {})
 
-    setSelectedSchema(schemaName)
-    setSelectedTable(schemaTables[0] ?? '')
-    resetTableUiState()
+      setSelectedSchema(schemaName)
+      setSelectedTable(schemaTables[0] ?? '')
+      resetTableUiState()
+    }
+
+    requestRawJsonConfirmation(selectSchema)
   }
 
   function handleTableClick(tableName: string): void {
-    setSelectedTable(tableName)
-    resetTableUiState()
+    const selectTable = (): void => {
+      setSelectedTable(tableName)
+      resetTableUiState()
+    }
+
+    requestRawJsonConfirmation(selectTable)
   }
 
   function handleCellChange(rowIndex: number, column: string, rawValue: string): void {
@@ -1229,7 +814,7 @@ function App(): JSX.Element {
     setStatusMessage('Raw JSON reset')
   }
 
-  function handleApplyRawJson(): void {
+  function applyRawJsonChanges(): boolean {
     try {
       const parsed = JSON.parse(displayedRawJsonText) as unknown
 
@@ -1237,7 +822,7 @@ function App(): JSX.Element {
         const message = 'Table Raw JSON must be an array of objects.'
         setRawJsonError(message)
         setStatusMessage('Invalid raw JSON')
-        return
+        return false
       }
 
       updateCurrentTable(parsed)
@@ -1245,10 +830,16 @@ function App(): JSX.Element {
       setRawJsonError(null)
       setIsRawDirty(false)
       setStatusMessage('Raw JSON applied to current table')
+      return true
     } catch (error) {
       setRawJsonError(error instanceof Error ? error.message : String(error))
       setStatusMessage('Invalid raw JSON')
+      return false
     }
+  }
+
+  function handleApplyRawJson(): void {
+    applyRawJsonChanges()
   }
 
   function handleExecuteQuery(): void {
@@ -1317,6 +908,36 @@ function App(): JSX.Element {
     return tableSort.direction === 'asc' ? '↑' : '↓'
   }
 
+  function requestRawJsonConfirmation(action: () => void | Promise<void>): void {
+    if (!isRawDirty) {
+      void action()
+      return
+    }
+
+    setConfirmDialog({
+      title: 'Raw JSON not applied',
+      message: 'You have Raw JSON changes that are not applied to the current table yet.',
+      confirmLabel: 'Discard Raw Changes',
+      confirmKind: 'danger',
+      onConfirm: async () => {
+        setRawJsonText('')
+        setRawJsonError(null)
+        setIsRawDirty(false)
+        setConfirmDialog(null)
+        await action()
+      },
+      saveAndContinueLabel: 'Apply Raw and continue',
+      onSaveAndContinue: async () => {
+        if (!applyRawJsonChanges()) {
+          return
+        }
+
+        setConfirmDialog(null)
+        await action()
+      }
+    })
+  }
+
   function requestUnsavedChangesConfirmation(action: () => void | Promise<void>): void {
     if (!hasUnsavedChanges) {
       void action()
@@ -1344,6 +965,27 @@ function App(): JSX.Element {
         await action()
       }
     })
+  }
+
+  function requestPendingChangesConfirmation(action: () => void | Promise<void>): void {
+    requestRawJsonConfirmation(() => requestUnsavedChangesConfirmation(action))
+  }
+
+  function handleTabChange(nextTab: Tab): void {
+    if (nextTab === activeTab) {
+      return
+    }
+
+    const switchTab = (): void => {
+      setActiveTab(nextTab)
+    }
+
+    if (isRawDirty && activeTab === 'raw' && nextTab !== 'raw') {
+      requestRawJsonConfirmation(switchTab)
+      return
+    }
+
+    switchTab()
   }
 
   function openSchemaContextMenu(
@@ -1386,19 +1028,24 @@ function App(): JSX.Element {
         </div>
 
         <div className="toolbar">
-          <button onClick={() => requestUnsavedChangesConfirmation(handleNewDatabase)}>
+          <button onClick={() => requestPendingChangesConfirmation(handleNewDatabase)}>
             New DB
           </button>
 
-          <button onClick={() => requestUnsavedChangesConfirmation(handleOpenDatabase)}>
+          <button onClick={() => requestPendingChangesConfirmation(handleOpenDatabase)}>
             Open DB
           </button>
 
-          <button onClick={() => void handleSaveDatabase()} disabled={!hasUnsavedChanges}>
+          <button
+            onClick={() => requestRawJsonConfirmation(() => void handleSaveDatabase())}
+            disabled={!hasUnsavedChanges && !isRawDirty}
+          >
             Save
           </button>
 
-          <button onClick={() => void handleSaveDatabaseAs()}>Save As</button>
+          <button onClick={() => requestRawJsonConfirmation(() => void handleSaveDatabaseAs())}>
+            Save As
+          </button>
 
           <button className="primary" onClick={openCreateSchemaDialog}>
             New Schema
@@ -1407,169 +1054,72 @@ function App(): JSX.Element {
       </header>
 
       <main className="main-layout">
-        <aside className="sidebar">
-          <div className="sidebar-title">CONNECTIONS</div>
-
-          <div className="connection-card">
-            <div className="connection-name">Local JSON File</div>
-            <div className="connection-path" title={displayedFilePath}>
-              {displayedFilePath}
-            </div>
-            <div className="connection-format">Format: {getSourceFormatLabel(sourceFormat)}</div>
-          </div>
-
-          <div className="sidebar-title">SCHEMAS</div>
-
-          <div className="schema-tree">
-            {schemas.map((schemaName) => (
-              <div key={schemaName} className="schema-block">
-                <button
-                  className={selectedSchema === schemaName ? 'schema-name selected' : 'schema-name'}
-                  onClick={() => handleSchemaClick(schemaName)}
-                  onContextMenu={(event) => openSchemaContextMenu(event, schemaName)}
-                >
-                  ▾ {schemaName}
-                </button>
-
-                {selectedSchema === schemaName && (
-                  <div className="table-list">
-                    {tables.map((tableName) => (
-                      <button
-                        key={tableName}
-                        className={
-                          selectedTable === tableName ? 'table-name selected' : 'table-name'
-                        }
-                        onClick={() => handleTableClick(tableName)}
-                        onContextMenu={(event) =>
-                          openTableContextMenu(event, schemaName, tableName)
-                        }
-                      >
-                        <span className="table-icon">▦</span>
-                        {tableName}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="sidebar-action-groups">
-            <div className="sidebar-action-group">
-              <div className="sidebar-action-title">Create</div>
-
-              <div className="sidebar-action-grid">
-                <button onClick={openCreateSchemaDialog}>+ Schema</button>
-
-                <button onClick={() => openCreateTableDialog()} disabled={!selectedSchema}>
-                  + Table
-                </button>
-              </div>
-            </div>
-
-            <div className="sidebar-action-group">
-              <div className="sidebar-action-title">Schema</div>
-
-              <div className="sidebar-action-grid">
-                <button onClick={() => openRenameSchemaDialog()} disabled={!selectedSchema}>
-                  Rename
-                </button>
-
-                <button
-                  className="danger-button subtle"
-                  onClick={() => openDeleteSchemaDialog()}
-                  disabled={!selectedSchema}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-
-            <div className="sidebar-action-group">
-              <div className="sidebar-action-title">Table</div>
-
-              <div className="sidebar-action-grid">
-                <button onClick={() => openRenameTableDialog()} disabled={!selectedTable}>
-                  Rename
-                </button>
-
-                <button
-                  className="danger-button subtle"
-                  onClick={() => openDeleteTableDialog()}
-                  disabled={!selectedTable}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </aside>
+        <Sidebar
+          displayedFilePath={displayedFilePath}
+          sourceFormatLabel={getSourceFormatLabel(sourceFormat)}
+          schemas={schemas}
+          selectedSchema={selectedSchema}
+          selectedTable={selectedTable}
+          tables={tables}
+          onSchemaClick={handleSchemaClick}
+          onTableClick={handleTableClick}
+          onSchemaContextMenu={openSchemaContextMenu}
+          onTableContextMenu={openTableContextMenu}
+          onCreateSchema={openCreateSchemaDialog}
+          onCreateTable={() => openCreateTableDialog()}
+          onRenameSchema={() => openRenameSchemaDialog()}
+          onDeleteSchema={() => openDeleteSchemaDialog()}
+          onRenameTable={() => openRenameTableDialog()}
+          onDeleteTable={() => openDeleteTableDialog()}
+        />
 
         <section className="workspace">
-          <div className="workspace-header">
-            <div>
-              <h2>
-                {selectedSchema}.{selectedTable || 'no_table_selected'}
-              </h2>
-              <p>
-                {rows.length} rows · {columns.length} columns
-                {tableFilter.trim() && <> · filtered {filteredRows.length}</>}
-                {tableSort && (
-                  <>
-                    {' '}
-                    · sorted by {tableSort.column} {tableSort.direction.toUpperCase()}
-                  </>
-                )}
-                {selectedRowIndex !== null && <> · selected row #{selectedRowIndex + 1}</>}
-              </p>
-            </div>
-
-            <div className="workspace-actions">
-              <button onClick={handleAddRow} disabled={!selectedTable}>
-                + Row
-              </button>
-              <button onClick={handleDuplicateRow} disabled={selectedRowIndex === null}>
-                Duplicate
-              </button>
-              <button onClick={handleDeleteRow} disabled={selectedRowIndex === null}>
-                Delete
-              </button>
-              <button
-                className="primary"
-                onClick={() => void handleApplyChanges()}
-                disabled={!hasUnsavedChanges}
-                title="Write current changes to the JSON file"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
+          <WorkspaceHeader
+            selectedSchema={selectedSchema}
+            selectedTable={selectedTable}
+            rowsCount={rows.length}
+            columnsCount={columns.length}
+            filteredRowsCount={filteredRows.length}
+            hasFilter={tableFilter.trim().length > 0}
+            sortSummary={
+              tableSort ? `${tableSort.column} ${tableSort.direction.toUpperCase()}` : null
+            }
+            selectedRowIndex={selectedRowIndex}
+            onAddRow={handleAddRow}
+            onDuplicateRow={handleDuplicateRow}
+            onDeleteRow={handleDeleteRow}
+            onApplyChanges={() => requestRawJsonConfirmation(() => void handleApplyChanges())}
+            canAddRow={Boolean(selectedTable)}
+            canDuplicateRow={selectedRowIndex !== null}
+            canDeleteRow={selectedRowIndex !== null}
+            canApplyChanges={hasUnsavedChanges || isRawDirty}
+          />
 
           <div className="tabs">
             <button
               className={activeTab === 'data' ? 'active' : ''}
-              onClick={() => setActiveTab('data')}
+              onClick={() => handleTabChange('data')}
             >
               Data
             </button>
 
             <button
               className={activeTab === 'structure' ? 'active' : ''}
-              onClick={() => setActiveTab('structure')}
+              onClick={() => handleTabChange('structure')}
             >
               Structure
             </button>
 
             <button
               className={activeTab === 'raw' ? 'active' : ''}
-              onClick={() => setActiveTab('raw')}
+              onClick={() => handleTabChange('raw')}
             >
               Raw JSON
             </button>
 
             <button
               className={activeTab === 'query' ? 'active' : ''}
-              onClick={() => setActiveTab('query')}
+              onClick={() => handleTabChange('query')}
             >
               Query
             </button>
@@ -1651,7 +1201,7 @@ function App(): JSX.Element {
                       {rows.length === 0 && (
                         <tr>
                           <td colSpan={columns.length + 1} className="empty-cell">
-                            Empty table. Click “+ Row” to create the first record.
+                            Empty table. Click ?+ Row? to create the first record.
                           </td>
                         </tr>
                       )}
@@ -1670,197 +1220,57 @@ function App(): JSX.Element {
             )}
 
             {activeTab === 'structure' && (
-              <div className="structure-panel">
-                <div className="structure-actions">
-                  <button onClick={openAddColumnDialog} disabled={!selectedTable}>
-                    + Column
-                  </button>
-                </div>
-
-                <div className="table-wrapper">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Column</th>
-                        <th>Type</th>
-                        <th>Nullable</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {columns.map((column) => {
-                        const values = rows.map((row) => row[column])
-                        const nullable = values.some(
-                          (value) => value === null || value === undefined
-                        )
-
-                        return (
-                          <tr key={column}>
-                            <td>{column}</td>
-                            <td>{inferType(values)}</td>
-                            <td>{nullable ? 'yes' : 'no'}</td>
-                            <td>
-                              <div className="inline-actions">
-                                <button onClick={() => openRenameColumnDialog(column)}>
-                                  Rename
-                                </button>
-                                <button
-                                  className="danger-button subtle"
-                                  onClick={() => openDeleteColumnDialog(column)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
-
-                      {columns.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="empty-cell">
-                            No structure available. Click “+ Column” to create the first column.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <StructurePanel
+                columns={columns}
+                rows={rows}
+                canAddColumn={Boolean(selectedTable)}
+                onAddColumn={openAddColumnDialog}
+                onRenameColumn={openRenameColumnDialog}
+                onDeleteColumn={openDeleteColumnDialog}
+              />
             )}
 
             {activeTab === 'raw' && (
-              <div className="raw-panel">
-                <textarea
-                  className={rawJsonError ? 'raw-editor raw-editor-error' : 'raw-editor'}
-                  value={displayedRawJsonText}
-                  onChange={(event) => handleRawJsonChange(event.target.value)}
-                  spellCheck={false}
-                />
-
-                <div className="raw-actions">
-                  <div className="raw-actions-left">
-                    {isRawDirty && (
-                      <span className="raw-dirty-indicator">Raw JSON not applied</span>
-                    )}
-                    {rawJsonError && <span className="raw-error">{rawJsonError}</span>}
-                  </div>
-
-                  <div className="raw-actions-right">
-                    <button onClick={handleResetRawJson} disabled={!isRawDirty}>
-                      Reset
-                    </button>
-
-                    <button onClick={handleFormatRawJson}>Format</button>
-
-                    <button className="primary" onClick={handleApplyRawJson} disabled={!isRawDirty}>
-                      Apply Raw
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <RawJsonPanel
+                rawJsonError={rawJsonError}
+                displayedRawJsonText={displayedRawJsonText}
+                isRawDirty={isRawDirty}
+                onRawJsonChange={handleRawJsonChange}
+                onResetRawJson={handleResetRawJson}
+                onFormatRawJson={handleFormatRawJson}
+                onApplyRawJson={handleApplyRawJson}
+              />
             )}
 
             {activeTab === 'query' && (
-              <div className="query-panel">
-                <textarea
-                  className="query-editor"
-                  value={query}
-                  onChange={(event) => {
-                    setQuery(event.target.value)
-                    setQueryHasRun(false)
-                    setQueryResultRows([])
-                    setQueryError(null)
-                  }}
-                  onKeyDown={(event) => {
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                      handleExecuteQuery()
-                    }
-                  }}
-                />
-
-                <div className="query-actions">
-                  <button className="primary" onClick={handleExecuteQuery}>
-                    Execute
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setQuery('')
-                      setQueryResultRows([])
-                      setQueryError(null)
-                      setQueryHasRun(false)
-                    }}
-                  >
-                    Clear
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setQuery(`SELECT * FROM ${selectedTable || 'table'}`)
-                      setQueryResultRows([])
-                      setQueryError(null)
-                      setQueryHasRun(false)
-                    }}
-                    disabled={!selectedTable}
-                  >
-                    Current Table
-                  </button>
-                </div>
-
-                {queryError && <div className="query-error">{queryError}</div>}
-
-                {!queryError && !queryHasRun && (
-                  <div className="query-result-placeholder">
-                    Supported examples:
-                    <code>SELECT * FROM {selectedTable || 'students'}</code>
-                    <code>SELECT id,name FROM {selectedTable || 'students'}</code>
-                    <code>SELECT * FROM {selectedTable || 'students'} WHERE active = true</code>
-                    <code>
-                      SELECT * FROM {selectedSchema}.{selectedTable || 'students'} WHERE id = 1
-                    </code>
-                    <span className="query-shortcut">Shortcut: Ctrl + Enter</span>
-                  </div>
-                )}
-
-                {!queryError && queryHasRun && queryResultRows.length === 0 && (
-                  <div className="query-empty-result">No rows matched the query.</div>
-                )}
-
-                {!queryError && queryResultRows.length > 0 && (
-                  <div className="query-result">
-                    <div className="query-result-header">
-                      Result: {queryResultRows.length} row(s)
-                    </div>
-
-                    <div className="table-wrapper">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th className="row-number">#</th>
-                            {queryResultColumns.map((column) => (
-                              <th key={column}>{column}</th>
-                            ))}
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          {queryResultRows.map((row, rowIndex) => (
-                            <tr key={rowIndex}>
-                              <td className="row-number">{rowIndex + 1}</td>
-
-                              {queryResultColumns.map((column) => (
-                                <td key={column}>{stringifyValue(row[column])}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <QueryPanel
+                query={query}
+                selectedSchema={selectedSchema}
+                selectedTable={selectedTable}
+                queryError={queryError}
+                queryHasRun={queryHasRun}
+                queryResultRows={queryResultRows}
+                queryResultColumns={queryResultColumns}
+                onQueryChange={(value) => {
+                  setQuery(value)
+                  setQueryHasRun(false)
+                  setQueryResultRows([])
+                  setQueryError(null)
+                }}
+                onExecuteQuery={handleExecuteQuery}
+                onClearQuery={() => {
+                  setQuery('')
+                  setQueryResultRows([])
+                  setQueryError(null)
+                  setQueryHasRun(false)
+                }}
+                onUseCurrentTable={() => {
+                  setQuery(`SELECT * FROM ${selectedTable || 'table'}`)
+                  setQueryResultRows([])
+                  setQueryError(null)
+                  setQueryHasRun(false)
+                }}
+              />
             )}
           </div>
         </section>
@@ -1916,11 +1326,13 @@ function App(): JSX.Element {
 
                     <button
                       onClick={() => {
-                        setSelectedSchema(menu.schemaName)
-                        setSelectedTable(menu.tableName)
-                        setActiveTab('data')
-                        resetTableUiState()
                         setContextMenu(null)
+                        requestRawJsonConfirmation(() => {
+                          setSelectedSchema(menu.schemaName)
+                          setSelectedTable(menu.tableName)
+                          setActiveTab('data')
+                          resetTableUiState()
+                        })
                       }}
                     >
                       Open Data
@@ -1928,11 +1340,13 @@ function App(): JSX.Element {
 
                     <button
                       onClick={() => {
-                        setSelectedSchema(menu.schemaName)
-                        setSelectedTable(menu.tableName)
-                        setActiveTab('structure')
-                        resetTableUiState()
                         setContextMenu(null)
+                        requestRawJsonConfirmation(() => {
+                          setSelectedSchema(menu.schemaName)
+                          setSelectedTable(menu.tableName)
+                          setActiveTab('structure')
+                          resetTableUiState()
+                        })
                       }}
                     >
                       Open Structure
@@ -2361,13 +1775,11 @@ function App(): JSX.Element {
         </div>
       )}
 
-      <footer className="statusbar">
-        <span>Status: {statusMessage}</span>
-        <span className={hasUnsavedChanges ? 'dirty-status' : ''}>
-          Unsaved changes: {hasUnsavedChanges ? 'yes' : 'no'}
-        </span>
-        <span>Path: {filePath ?? 'mock://database.json'}</span>
-      </footer>
+      <StatusBar
+        statusMessage={statusMessage}
+        hasUnsavedChanges={hasUnsavedChanges}
+        filePath={filePath}
+      />
     </div>
   )
 }
