@@ -232,6 +232,12 @@ button:disabled:hover {
   gap: 2px;
 }
 
+.recent-files-list {
+  max-height: 112px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .table-name {
   display: flex;
   align-items: center;

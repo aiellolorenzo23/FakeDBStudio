@@ -60,7 +60,7 @@ function Sidebar({
           <div className="sidebar-title">RECENT FILES</div>
 
           <div className="sidebar-action-group">
-            <div className="table-list">
+            <div className="table-list recent-files-list">
               {recentFiles.map((recentFile) => (
                 <button
                   key={recentFile}
