@@ -560,3 +560,26 @@ button:disabled:hover {
 .danger-button:hover {
   background: #991b1b;
 }
+
+.structure-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  height: 100%;
+}
+
+.structure-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.danger-button.subtle {
+  padding: 6px 9px;
+  font-size: 12px;
+}

@@ -13,6 +13,9 @@ type DialogMode =
   | 'deleteSchema'
   | 'renameTable'
   | 'deleteTable'
+  | 'addColumn'
+  | 'renameColumn'
+  | 'deleteColumn'
   | null
 
 function stringifyValue(value: JsonValue | undefined): string {
@@ -185,6 +188,9 @@ function App(): JSX.Element {
   const [rawJsonText, setRawJsonText] = useState('')
   const [rawJsonError, setRawJsonError] = useState<string | null>(null)
   const [isRawDirty, setIsRawDirty] = useState(false)
+  const [columnNameInput, setColumnNameInput] = useState('')
+  const [columnDefaultInput, setColumnDefaultInput] = useState('')
+  const [selectedColumnName, setSelectedColumnName] = useState<string | null>(null)
 
   const schemas = Object.keys(db.schemas)
 
@@ -669,6 +675,119 @@ function App(): JSX.Element {
     setDialogMode(null)
   }
 
+  function openAddColumnDialog(): void {
+    if (!selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    setColumnNameInput('new_column')
+    setColumnDefaultInput('')
+    setSelectedColumnName(null)
+    setDialogMode('addColumn')
+  }
+
+  function handleAddColumn(): void {
+    if (!selectedSchema || !selectedTable) {
+      setStatusMessage('Select a table first')
+      return
+    }
+
+    const columnName = normalizeIdentifier(columnNameInput)
+
+    if (!columnName) {
+      setStatusMessage('Column name cannot be empty')
+      return
+    }
+
+    if (columns.includes(columnName)) {
+      setStatusMessage(`Column "${columnName}" already exists`)
+      return
+    }
+
+    const defaultValue = parseCellValue(columnDefaultInput)
+
+    const nextRows =
+      rows.length === 0
+        ? [{ [columnName]: defaultValue }]
+        : rows.map((row) => ({
+            ...row,
+            [columnName]: defaultValue
+          }))
+
+    updateCurrentTable(nextRows)
+    setStatusMessage(`Column "${columnName}" added`)
+    setDialogMode(null)
+  }
+
+  function openRenameColumnDialog(columnName: string): void {
+    setSelectedColumnName(columnName)
+    setColumnNameInput(columnName)
+    setDialogMode('renameColumn')
+  }
+
+  function handleRenameColumn(): void {
+    if (!selectedColumnName) {
+      setStatusMessage('Select a column first')
+      return
+    }
+
+    const nextColumnName = normalizeIdentifier(columnNameInput)
+
+    if (!nextColumnName) {
+      setStatusMessage('Column name cannot be empty')
+      return
+    }
+
+    if (nextColumnName === selectedColumnName) {
+      setDialogMode(null)
+      return
+    }
+
+    if (columns.includes(nextColumnName)) {
+      setStatusMessage(`Column "${nextColumnName}" already exists`)
+      return
+    }
+
+    const nextRows = rows.map((row) => {
+      const nextRow: TableRow = {}
+
+      Object.entries(row).forEach(([key, value]) => {
+        nextRow[key === selectedColumnName ? nextColumnName : key] = value
+      })
+
+      return nextRow
+    })
+
+    updateCurrentTable(nextRows)
+    setStatusMessage(`Column "${selectedColumnName}" renamed to "${nextColumnName}"`)
+    setSelectedColumnName(null)
+    setDialogMode(null)
+  }
+
+  function openDeleteColumnDialog(columnName: string): void {
+    setSelectedColumnName(columnName)
+    setDialogMode('deleteColumn')
+  }
+
+  function handleDeleteColumn(): void {
+    if (!selectedColumnName) {
+      setStatusMessage('Select a column first')
+      return
+    }
+
+    const nextRows = rows.map((row) => {
+      const nextRow = { ...row }
+      delete nextRow[selectedColumnName]
+      return nextRow
+    })
+
+    updateCurrentTable(nextRows)
+    setStatusMessage(`Column "${selectedColumnName}" deleted`)
+    setSelectedColumnName(null)
+    setDialogMode(null)
+  }
+
   function handleRawJsonChange(value: string): void {
     setRawJsonText(value)
     setRawJsonError(null)
@@ -921,39 +1040,63 @@ function App(): JSX.Element {
             )}
 
             {activeTab === 'structure' && (
-              <div className="table-wrapper">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Column</th>
-                      <th>Type</th>
-                      <th>Nullable</th>
-                    </tr>
-                  </thead>
+              <div className="structure-panel">
+                <div className="structure-actions">
+                  <button onClick={openAddColumnDialog} disabled={!selectedTable}>
+                    + Column
+                  </button>
+                </div>
 
-                  <tbody>
-                    {columns.map((column) => {
-                      const values = rows.map((row) => row[column])
-                      const nullable = values.some((value) => value === null || value === undefined)
-
-                      return (
-                        <tr key={column}>
-                          <td>{column}</td>
-                          <td>{inferType(values)}</td>
-                          <td>{nullable ? 'yes' : 'no'}</td>
-                        </tr>
-                      )
-                    })}
-
-                    {columns.length === 0 && (
+                <div className="table-wrapper">
+                  <table className="data-table">
+                    <thead>
                       <tr>
-                        <td colSpan={3} className="empty-cell">
-                          No structure available
-                        </td>
+                        <th>Column</th>
+                        <th>Type</th>
+                        <th>Nullable</th>
+                        <th>Actions</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+
+                    <tbody>
+                      {columns.map((column) => {
+                        const values = rows.map((row) => row[column])
+                        const nullable = values.some(
+                          (value) => value === null || value === undefined
+                        )
+
+                        return (
+                          <tr key={column}>
+                            <td>{column}</td>
+                            <td>{inferType(values)}</td>
+                            <td>{nullable ? 'yes' : 'no'}</td>
+                            <td>
+                              <div className="inline-actions">
+                                <button onClick={() => openRenameColumnDialog(column)}>
+                                  Rename
+                                </button>
+                                <button
+                                  className="danger-button subtle"
+                                  onClick={() => openDeleteColumnDialog(column)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+
+                      {columns.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="empty-cell">
+                            No structure available. Click “+ Column” to create the first column.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -1241,6 +1384,138 @@ function App(): JSX.Element {
                   <button onClick={() => setDialogMode(null)}>Cancel</button>
                   <button className="danger-button" onClick={handleDeleteTable}>
                     Delete Table
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'addColumn' && (
+              <>
+                <div className="modal-header">
+                  <h3>Add Column</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="modal-info">
+                    Table:{' '}
+                    <strong>
+                      {selectedSchema}.{selectedTable}
+                    </strong>
+                  </div>
+
+                  <label className="field-label" htmlFor="column-name">
+                    Column name
+                  </label>
+
+                  <input
+                    id="column-name"
+                    className="modal-input"
+                    value={columnNameInput}
+                    autoFocus
+                    onChange={(event) => setColumnNameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleAddColumn()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+
+                  <label className="field-label" htmlFor="column-default">
+                    Default value
+                  </label>
+
+                  <input
+                    id="column-default"
+                    className="modal-input"
+                    value={columnDefaultInput}
+                    placeholder='Example: "", 0, true, null'
+                    onChange={(event) => setColumnDefaultInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleAddColumn()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+
+                  <div className="modal-hint">
+                    Values are parsed like cells: <code>true</code>, <code>false</code>,{' '}
+                    <code>null</code>, numbers and JSON objects/arrays are supported.
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleAddColumn}>
+                    Add Column
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'renameColumn' && (
+              <>
+                <div className="modal-header">
+                  <h3>Rename Column</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="modal-info">
+                    Current column: <strong>{selectedColumnName}</strong>
+                  </div>
+
+                  <label className="field-label" htmlFor="rename-column">
+                    New column name
+                  </label>
+
+                  <input
+                    id="rename-column"
+                    className="modal-input"
+                    value={columnNameInput}
+                    autoFocus
+                    onChange={(event) => setColumnNameInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleRenameColumn()
+                      if (event.key === 'Escape') setDialogMode(null)
+                    }}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="primary" onClick={handleRenameColumn}>
+                    Rename Column
+                  </button>
+                </div>
+              </>
+            )}
+
+            {dialogMode === 'deleteColumn' && (
+              <>
+                <div className="modal-header">
+                  <h3>Delete Column</h3>
+                  <button className="icon-button" onClick={() => setDialogMode(null)}>
+                    ×
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <div className="danger-box">
+                    You are about to delete column <strong>{selectedColumnName}</strong> from table{' '}
+                    <strong>
+                      {selectedSchema}.{selectedTable}
+                    </strong>
+                    .
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button onClick={() => setDialogMode(null)}>Cancel</button>
+                  <button className="danger-button" onClick={handleDeleteColumn}>
+                    Delete Column
                   </button>
                 </div>
               </>
