@@ -170,6 +170,155 @@ function isRawTable(value: unknown): value is TableRow[] {
   return Array.isArray(value) && value.every(isRawTableRow)
 }
 
+type QueryOperator = '=' | '!=' | '>' | '<' | '>=' | '<='
+
+type SelectedFields = '*' | string[]
+
+type ParsedSelectQuery = {
+  schemaName?: string
+  tableName: string
+  fields: SelectedFields
+  where?: {
+    field: string
+    operator: QueryOperator
+    value: JsonValue
+  }
+}
+
+function parseQueryValue(rawValue: string): JsonValue {
+  const value = rawValue.trim()
+
+  const isSingleQuoted = value.startsWith("'") && value.endsWith("'")
+  const isDoubleQuoted = value.startsWith('"') && value.endsWith('"')
+
+  if (isSingleQuoted || isDoubleQuoted) {
+    return value.slice(1, -1)
+  }
+
+  if (value === 'null') return null
+  if (value === 'true') return true
+  if (value === 'false') return false
+
+  if (!Number.isNaN(Number(value)) && value !== '') {
+    return Number(value)
+  }
+
+  if (
+    (value.startsWith('{') && value.endsWith('}')) ||
+    (value.startsWith('[') && value.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(value) as JsonValue
+    } catch {
+      return value
+    }
+  }
+
+  return value
+}
+
+function parseSelectQuery(rawQuery: string): ParsedSelectQuery {
+  const normalizedQuery = rawQuery.trim().replace(/\s+/g, ' ')
+
+  const queryMatch = normalizedQuery.match(
+    /^select\s+(.+?)\s+from\s+([a-zA-Z0-9_.-]+)(?:\s+where\s+([a-zA-Z0-9_.-]+)\s*(>=|<=|!=|=|>|<)\s*(.+))?$/i
+  )
+
+  if (!queryMatch) {
+    throw new Error(
+      'Unsupported query. Use: SELECT * FROM table oppure SELECT field1,field2 FROM schema.table WHERE field = value'
+    )
+  }
+
+  const [, rawFields, rawTableRef, rawWhereField, rawOperator, rawWhereValue] = queryMatch
+
+  const tableParts = rawTableRef.split('.')
+
+  if (tableParts.length > 2) {
+    throw new Error('Invalid table reference. Use table or schema.table')
+  }
+
+  const schemaName = tableParts.length === 2 ? tableParts[0] : undefined
+  const tableName = tableParts.length === 2 ? tableParts[1] : tableParts[0]
+
+  const fields =
+    rawFields.trim() === '*'
+      ? '*'
+      : rawFields
+          .split(',')
+          .map((field) => field.trim())
+          .filter((field) => field.length > 0)
+
+  if (fields !== '*' && fields.length === 0) {
+    throw new Error('Select at least one field')
+  }
+
+  return {
+    schemaName,
+    tableName,
+    fields,
+    where:
+      rawWhereField && rawOperator && rawWhereValue
+        ? {
+            field: rawWhereField,
+            operator: rawOperator as QueryOperator,
+            value: parseQueryValue(rawWhereValue)
+          }
+        : undefined
+  }
+}
+
+function areValuesEqual(left: JsonValue | undefined, right: JsonValue): boolean {
+  if (left === undefined) return false
+
+  if (typeof left === 'object' || typeof right === 'object') {
+    return JSON.stringify(left) === JSON.stringify(right)
+  }
+
+  return left === right
+}
+
+function compareValues(
+  left: JsonValue | undefined,
+  operator: QueryOperator,
+  right: JsonValue
+): boolean {
+  if (operator === '=') return areValuesEqual(left, right)
+  if (operator === '!=') return !areValuesEqual(left, right)
+
+  if (left === undefined || left === null || right === null) {
+    return false
+  }
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (operator === '>') return left > right
+    if (operator === '<') return left < right
+    if (operator === '>=') return left >= right
+    if (operator === '<=') return left <= right
+  }
+
+  const leftText = String(left)
+  const rightText = String(right)
+
+  if (operator === '>') return leftText > rightText
+  if (operator === '<') return leftText < rightText
+  if (operator === '>=') return leftText >= rightText
+  if (operator === '<=') return leftText <= rightText
+
+  return false
+}
+
+function projectRow(row: TableRow, fields: SelectedFields): TableRow {
+  if (fields === '*') {
+    return cloneRow(row)
+  }
+
+  return fields.reduce<TableRow>((projectedRow, field) => {
+    projectedRow[field] = row[field] ?? null
+    return projectedRow
+  }, {})
+}
+
 function App(): JSX.Element {
   const [db, setDb] = useState<FakeDb>(mockDb)
   const [selectedSchema, setSelectedSchema] = useState('main')
@@ -191,6 +340,9 @@ function App(): JSX.Element {
   const [columnNameInput, setColumnNameInput] = useState('')
   const [columnDefaultInput, setColumnDefaultInput] = useState('')
   const [selectedColumnName, setSelectedColumnName] = useState<string | null>(null)
+  const [queryResultRows, setQueryResultRows] = useState<TableRow[]>([])
+  const [queryError, setQueryError] = useState<string | null>(null)
+  const [queryHasRun, setQueryHasRun] = useState(false)
 
   const schemas = Object.keys(db.schemas)
 
@@ -204,6 +356,7 @@ function App(): JSX.Element {
   }, [db, selectedSchema, selectedTable])
 
   const columns = useMemo(() => inferColumns(rows), [rows])
+  const queryResultColumns = useMemo(() => inferColumns(queryResultRows), [queryResultRows])
 
   useEffect(() => {
     setRawJsonText(JSON.stringify(rows, null, 2))
@@ -833,6 +986,40 @@ function App(): JSX.Element {
     }
   }
 
+  function handleExecuteQuery(): void {
+    try {
+      const parsedQuery = parseSelectQuery(query)
+      const schemaToUse = parsedQuery.schemaName ?? selectedSchema
+      const tableRows = db.schemas[schemaToUse]?.[parsedQuery.tableName]
+
+      if (!tableRows) {
+        throw new Error(`Table "${schemaToUse}.${parsedQuery.tableName}" not found`)
+      }
+
+      const filteredRows = parsedQuery.where
+        ? tableRows.filter((row) =>
+            compareValues(
+              row[parsedQuery.where!.field],
+              parsedQuery.where!.operator,
+              parsedQuery.where!.value
+            )
+          )
+        : tableRows
+
+      const projectedRows = filteredRows.map((row) => projectRow(row, parsedQuery.fields))
+
+      setQueryResultRows(projectedRows)
+      setQueryError(null)
+      setQueryHasRun(true)
+      setStatusMessage(`Query executed: ${projectedRows.length} row(s)`)
+    } catch (error) {
+      setQueryResultRows([])
+      setQueryError(error instanceof Error ? error.message : String(error))
+      setQueryHasRun(true)
+      setStatusMessage('Query failed')
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1137,18 +1324,99 @@ function App(): JSX.Element {
                 <textarea
                   className="query-editor"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value)
+                    setQueryHasRun(false)
+                    setQueryResultRows([])
+                    setQueryError(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      handleExecuteQuery()
+                    }
+                  }}
                 />
 
                 <div className="query-actions">
-                  <button className="primary">Execute</button>
-                  <button onClick={() => setQuery('')}>Clear</button>
+                  <button className="primary" onClick={handleExecuteQuery}>
+                    Execute
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setQuery('')
+                      setQueryResultRows([])
+                      setQueryError(null)
+                      setQueryHasRun(false)
+                    }}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setQuery(`SELECT * FROM ${selectedTable || 'table'}`)
+                      setQueryResultRows([])
+                      setQueryError(null)
+                      setQueryHasRun(false)
+                    }}
+                    disabled={!selectedTable}
+                  >
+                    Current Table
+                  </button>
                 </div>
 
-                <div className="query-result-placeholder">
-                  Query engine non ancora collegato.
-                  <code>SELECT * FROM {selectedTable || 'table'}</code>
-                </div>
+                {queryError && <div className="query-error">{queryError}</div>}
+
+                {!queryError && !queryHasRun && (
+                  <div className="query-result-placeholder">
+                    Supported examples:
+                    <code>SELECT * FROM {selectedTable || 'students'}</code>
+                    <code>SELECT id,name FROM {selectedTable || 'students'}</code>
+                    <code>SELECT * FROM {selectedTable || 'students'} WHERE active = true</code>
+                    <code>
+                      SELECT * FROM {selectedSchema}.{selectedTable || 'students'} WHERE id = 1
+                    </code>
+                    <span className="query-shortcut">Shortcut: Ctrl + Enter</span>
+                  </div>
+                )}
+
+                {!queryError && queryHasRun && queryResultRows.length === 0 && (
+                  <div className="query-empty-result">No rows matched the query.</div>
+                )}
+
+                {!queryError && queryResultRows.length > 0 && (
+                  <div className="query-result">
+                    <div className="query-result-header">
+                      Result: {queryResultRows.length} row(s)
+                    </div>
+
+                    <div className="table-wrapper">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th className="row-number">#</th>
+                            {queryResultColumns.map((column) => (
+                              <th key={column}>{column}</th>
+                            ))}
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {queryResultRows.map((row, rowIndex) => (
+                            <tr key={rowIndex}>
+                              <td className="row-number">{rowIndex + 1}</td>
+
+                              {queryResultColumns.map((column) => (
+                                <td key={column}>{stringifyValue(row[column])}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

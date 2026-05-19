@@ -583,3 +583,32 @@ button:disabled:hover {
   padding: 6px 9px;
   font-size: 12px;
 }
+
+.query-error {
+  border: 1px solid rgba(248, 113, 113, 0.36);
+  border-radius: 12px;
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.query-result {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+  min-height: 0;
+}
+
+.query-result-header {
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.query-shortcut {
+  display: block;
+  margin-top: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
