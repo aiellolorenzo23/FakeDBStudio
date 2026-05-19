@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises'
 
 const RECENT_FILES_LIMIT = 8
 const recentFilesPath = join(app.getPath('userData'), 'recent-files.json')
+const lastOpenedFilePath = join(app.getPath('userData'), 'last-opened-file.json')
 
 async function readRecentFiles(): Promise<string[]> {
   try {
@@ -27,6 +28,22 @@ async function writeRecentFiles(filePaths: string[]): Promise<void> {
   await writeFile(recentFilesPath, JSON.stringify(filePaths, null, 2), 'utf-8')
 }
 
+async function readLastOpenedFile(): Promise<string | null> {
+  try {
+    const content = await readFile(lastOpenedFilePath, 'utf-8')
+    const parsed = JSON.parse(content) as unknown
+
+    return typeof parsed === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+async function writeLastOpenedFile(filePath: string | null): Promise<void> {
+  await mkdir(join(lastOpenedFilePath, '..'), { recursive: true })
+  await writeFile(lastOpenedFilePath, JSON.stringify(filePath, null, 2), 'utf-8')
+}
+
 async function pushRecentFile(filePath: string): Promise<void> {
   const currentRecentFiles = await readRecentFiles()
   const nextRecentFiles = [
@@ -35,13 +52,19 @@ async function pushRecentFile(filePath: string): Promise<void> {
   ].slice(0, RECENT_FILES_LIMIT)
 
   await writeRecentFiles(nextRecentFiles)
+  await writeLastOpenedFile(filePath)
 }
 
 async function removeRecentFile(filePath: string): Promise<void> {
   const currentRecentFiles = await readRecentFiles()
   const nextRecentFiles = currentRecentFiles.filter((entry) => entry !== filePath)
+  const currentLastOpenedFile = await readLastOpenedFile()
 
   await writeRecentFiles(nextRecentFiles)
+
+  if (currentLastOpenedFile === filePath) {
+    await writeLastOpenedFile(null)
+  }
 }
 
 function createWindow(): void {
@@ -165,6 +188,10 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
 
 ipcMain.handle('fake-db:get-recent-files', async () => {
   return readRecentFiles()
+})
+
+ipcMain.handle('fake-db:get-last-opened-file', async () => {
+  return readLastOpenedFile()
 })
 
 ipcMain.handle('fake-db:open-recent-database', async (_, filePath: string) => {

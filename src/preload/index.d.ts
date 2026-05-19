@@ -19,6 +19,8 @@ export interface FakeDbApi {
 
   getRecentFiles: () => Promise<string[]>
 
+  getLastOpenedFile: () => Promise<string | null>
+
   openRecentDatabase: (filePath: string) => Promise<OpenDatabaseResult>
 
   saveDatabase: (filePath: string, content: string) => Promise<SaveDatabaseResult>

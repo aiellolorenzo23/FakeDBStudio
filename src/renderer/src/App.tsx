@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import logoImage from './assets/brand/logo.png'
 import ContextMenu from './components/ContextMenu'
@@ -217,58 +217,108 @@ function App(): JSX.Element {
     return buildPersistedDatabaseContent(db, sourceFormat)
   }
 
-  function selectFirstAvailableTable(nextDb: FakeDb): void {
-    const nextSchemas = Object.keys(nextDb.schemas)
-    const firstSchema = nextSchemas[0] ?? ''
-    const firstTables = firstSchema ? Object.keys(nextDb.schemas[firstSchema] ?? {}) : []
-    const firstTable = firstTables[0] ?? ''
-
-    setSelectedSchema(firstSchema)
-    setSelectedTable(firstTable)
-    resetTableUiState()
-  }
-
-  function resetTableUiState(): void {
+  const resetTableUiState = useCallback((): void => {
     setTableFilter('')
     setTableSort(null)
     setSelectedRowIndex(null)
     setRawJsonText('')
     setRawJsonError(null)
     setIsRawDirty(false)
-  }
+  }, [])
 
-  async function refreshRecentFiles(): Promise<void> {
+  const selectFirstAvailableTable = useCallback(
+    (nextDb: FakeDb): void => {
+      const nextSchemas = Object.keys(nextDb.schemas)
+      const firstSchema = nextSchemas[0] ?? ''
+      const firstTables = firstSchema ? Object.keys(nextDb.schemas[firstSchema] ?? {}) : []
+      const firstTable = firstTables[0] ?? ''
+
+      setSelectedSchema(firstSchema)
+      setSelectedTable(firstTable)
+      resetTableUiState()
+    },
+    [resetTableUiState]
+  )
+
+  const refreshRecentFiles = useCallback(async (): Promise<void> => {
     try {
       const nextRecentFiles = await window.fakeDb.getRecentFiles()
       setRecentFiles(nextRecentFiles)
     } catch {
       setRecentFiles([])
     }
-  }
+  }, [])
 
-  function applyOpenedDatabase(content: string, nextFilePath: string | null): void {
-    const parsedJson = JSON.parse(content) as unknown
-    const nextDb = normalizeJsonToFakeDb(parsedJson)
-    const nextSourceFormat = detectSourceFormat(parsedJson)
+  const applyOpenedDatabase = useCallback(
+    (content: string, nextFilePath: string | null): void => {
+      const parsedJson = JSON.parse(content) as unknown
+      const nextDb = normalizeJsonToFakeDb(parsedJson)
+      const nextSourceFormat = detectSourceFormat(parsedJson)
 
-    setDb(nextDb)
-    setSourceFormat(nextSourceFormat)
-    setFilePath(nextFilePath)
-    setHasUnsavedChanges(false)
-    selectFirstAvailableTable(nextDb)
-    setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
-  }
+      setDb(nextDb)
+      setSourceFormat(nextSourceFormat)
+      setFilePath(nextFilePath)
+      setHasUnsavedChanges(false)
+      selectFirstAvailableTable(nextDb)
+      setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
+    },
+    [selectFirstAvailableTable]
+  )
+
+  const handleOpenRecentDatabase = useCallback(
+    async (nextFilePath: string): Promise<void> => {
+      try {
+        const result = await window.fakeDb.openRecentDatabase(nextFilePath)
+
+        if (result.error) {
+          setStatusMessage(result.error)
+          await refreshRecentFiles()
+          return
+        }
+
+        if (!result.content) {
+          setStatusMessage('Unable to open recent database')
+          await refreshRecentFiles()
+          return
+        }
+
+        applyOpenedDatabase(result.content, result.filePath ?? nextFilePath)
+        await refreshRecentFiles()
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : String(error))
+      }
+    },
+    [applyOpenedDatabase, refreshRecentFiles]
+  )
 
   useEffect(() => {
     window.fakeDb
-      .getRecentFiles()
-      .then((nextRecentFiles) => {
-        setRecentFiles(nextRecentFiles)
+      .getLastOpenedFile()
+      .then((lastOpenedFile) => {
+        if (lastOpenedFile) {
+          return handleOpenRecentDatabase(lastOpenedFile)
+        }
+
+        return window.fakeDb
+          .getRecentFiles()
+          .then((nextRecentFiles) => {
+            setRecentFiles(nextRecentFiles)
+          })
+          .catch(() => {
+            setRecentFiles([])
+          })
       })
       .catch(() => {
-        setRecentFiles([])
+        window.fakeDb
+          .getRecentFiles()
+          .then((nextRecentFiles) => {
+            setRecentFiles(nextRecentFiles)
+          })
+          .catch(() => {
+            setRecentFiles([])
+          })
       })
-  }, [])
+  }, [handleOpenRecentDatabase])
 
   async function handleOpenDatabase(): Promise<void> {
     try {
@@ -280,29 +330,6 @@ function App(): JSX.Element {
       }
 
       applyOpenedDatabase(result.content, result.filePath ?? null)
-      await refreshRecentFiles()
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  async function handleOpenRecentDatabase(nextFilePath: string): Promise<void> {
-    try {
-      const result = await window.fakeDb.openRecentDatabase(nextFilePath)
-
-      if (result.error) {
-        setStatusMessage(result.error)
-        await refreshRecentFiles()
-        return
-      }
-
-      if (!result.content) {
-        setStatusMessage('Unable to open recent database')
-        await refreshRecentFiles()
-        return
-      }
-
-      applyOpenedDatabase(result.content, result.filePath ?? nextFilePath)
       await refreshRecentFiles()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))

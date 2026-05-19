@@ -6,6 +6,8 @@ const fakeDbApi = {
 
   getRecentFiles: () => ipcRenderer.invoke('fake-db:get-recent-files'),
 
+  getLastOpenedFile: () => ipcRenderer.invoke('fake-db:get-last-opened-file'),
+
   openRecentDatabase: (filePath: string) =>
     ipcRenderer.invoke('fake-db:open-recent-database', filePath),
 
