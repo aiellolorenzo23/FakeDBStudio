@@ -769,3 +769,38 @@ button:disabled:hover {
 .context-menu .danger-menu-item:hover {
   background: rgba(127, 29, 29, 0.35);
 }
+
+.column-sort-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.column-sort-button:hover {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.column-sort-button.active {
+  color: #7dd3fc;
+}
+
+.column-sort-indicator {
+  color: #94a3b8;
+  font-size: 11px;
+  min-width: 14px;
+  text-align: right;
+}
+
+.column-sort-button.active .column-sort-indicator {
+  color: #7dd3fc;
+}

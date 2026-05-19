@@ -52,6 +52,39 @@ type PersistedDatabaseContent = {
   fallbackToFakeDb: boolean
 }
 
+type SortDirection = 'asc' | 'desc'
+
+type TableSortState = {
+  column: string
+  direction: SortDirection
+} | null
+
+function isEmptySortableValue(value: JsonValue | undefined): boolean {
+  return value === undefined || value === null || value === ''
+}
+
+function compareSortableValues(left: JsonValue | undefined, right: JsonValue | undefined): number {
+  const leftIsEmpty = isEmptySortableValue(left)
+  const rightIsEmpty = isEmptySortableValue(right)
+
+  if (leftIsEmpty && rightIsEmpty) return 0
+  if (leftIsEmpty) return 1
+  if (rightIsEmpty) return -1
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right
+  }
+
+  if (typeof left === 'boolean' && typeof right === 'boolean') {
+    return Number(left) - Number(right)
+  }
+
+  return stringifyValue(left).localeCompare(stringifyValue(right), undefined, {
+    numeric: true,
+    sensitivity: 'base'
+  })
+}
+
 function stringifyValue(value: JsonValue | undefined): string {
   if (value === undefined) return ''
   if (value === null) return 'null'
@@ -492,6 +525,7 @@ function App(): JSX.Element {
   const [queryError, setQueryError] = useState<string | null>(null)
   const [queryHasRun, setQueryHasRun] = useState(false)
   const [tableFilter, setTableFilter] = useState('')
+  const [tableSort, setTableSort] = useState<TableSortState>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [sourceFormat, setSourceFormat] = useState<SourceFormat>('fakeDb')
@@ -530,6 +564,20 @@ function App(): JSX.Element {
       columns.some((column) => stringifyValue(row[column]).toLowerCase().includes(normalizedFilter))
     )
   }, [rows, columns, tableFilter])
+  const sortedFilteredRows = useMemo(() => {
+    if (!tableSort) {
+      return filteredRows
+    }
+
+    return [...filteredRows].sort((left, right) => {
+      const compareResult = compareSortableValues(
+        left.row[tableSort.column],
+        right.row[tableSort.column]
+      )
+
+      return tableSort.direction === 'asc' ? compareResult : -compareResult
+    })
+  }, [filteredRows, tableSort])
 
   function updateCurrentTable(nextRows: TableRow[]): void {
     setDb((currentDb) => ({
@@ -630,6 +678,7 @@ function App(): JSX.Element {
 
   function resetTableUiState(): void {
     setTableFilter('')
+    setTableSort(null)
     setSelectedRowIndex(null)
     setRawJsonText('')
     setRawJsonError(null)
@@ -1240,6 +1289,34 @@ function App(): JSX.Element {
     }
   }
 
+  function toggleTableSort(column: string): void {
+    setTableSort((currentSort) => {
+      if (!currentSort || currentSort.column !== column) {
+        return {
+          column,
+          direction: 'asc'
+        }
+      }
+
+      if (currentSort.direction === 'asc') {
+        return {
+          column,
+          direction: 'desc'
+        }
+      }
+
+      return null
+    })
+  }
+
+  function getTableSortIndicator(column: string): string {
+    if (!tableSort || tableSort.column !== column) {
+      return '↕'
+    }
+
+    return tableSort.direction === 'asc' ? '↑' : '↓'
+  }
+
   function requestUnsavedChangesConfirmation(action: () => void | Promise<void>): void {
     if (!hasUnsavedChanges) {
       void action()
@@ -1437,6 +1514,12 @@ function App(): JSX.Element {
               <p>
                 {rows.length} rows · {columns.length} columns
                 {tableFilter.trim() && <> · filtered {filteredRows.length}</>}
+                {tableSort && (
+                  <>
+                    {' '}
+                    · sorted by {tableSort.column} {tableSort.direction.toUpperCase()}
+                  </>
+                )}
                 {selectedRowIndex !== null && <> · selected row #{selectedRowIndex + 1}</>}
               </p>
             </div>
@@ -1521,13 +1604,28 @@ function App(): JSX.Element {
                       <tr>
                         <th className="row-number">#</th>
                         {columns.map((column) => (
-                          <th key={column}>{column}</th>
+                          <th key={column}>
+                            <button
+                              className={
+                                tableSort?.column === column
+                                  ? 'column-sort-button active'
+                                  : 'column-sort-button'
+                              }
+                              onClick={() => toggleTableSort(column)}
+                              title={`Sort by ${column}`}
+                            >
+                              <span>{column}</span>
+                              <span className="column-sort-indicator">
+                                {getTableSortIndicator(column)}
+                              </span>
+                            </button>
+                          </th>
                         ))}
                       </tr>
                     </thead>
 
                     <tbody>
-                      {filteredRows.map(({ row, originalIndex }) => (
+                      {sortedFilteredRows.map(({ row, originalIndex }) => (
                         <tr
                           key={originalIndex}
                           className={selectedRowIndex === originalIndex ? 'selected-row' : ''}
