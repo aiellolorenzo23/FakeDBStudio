@@ -1,22 +1,27 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
-const api = {}
+const fakeDbApi = {
+  openDatabase: () => ipcRenderer.invoke('fake-db:open-database'),
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
+  saveDatabase: (filePath: string, content: string) =>
+    ipcRenderer.invoke('fake-db:save-database', filePath, content),
+
+  saveDatabaseAs: (content: string) => ipcRenderer.invoke('fake-db:save-database-as', content)
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('fakeDb', fakeDbApi)
   } catch (error) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
   window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  window.fakeDb = fakeDbApi
 }

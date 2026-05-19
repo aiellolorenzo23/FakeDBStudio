@@ -1,7 +1,8 @@
-import { JSX, useMemo, useState } from 'react'
+import { JSX, useEffect, useMemo, useState } from 'react'
 import { mockDb } from './mock/mockDb'
-import type { JsonValue, TableRow } from './model/fakeDb'
+import type { FakeDb, JsonValue, TableRow } from './model/fakeDb'
 import logoImage from './assets/brand/logo.png'
+import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
 type Tab = 'data' | 'structure' | 'raw' | 'query'
 
@@ -14,6 +15,32 @@ function stringifyValue(value: JsonValue | undefined): string {
   }
 
   return String(value)
+}
+
+function parseCellValue(rawValue: string): JsonValue {
+  const value = rawValue.trim()
+
+  if (value === '') return ''
+  if (value === 'null') return null
+  if (value === 'true') return true
+  if (value === 'false') return false
+
+  if (!Number.isNaN(Number(value)) && value !== '') {
+    return Number(value)
+  }
+
+  if (
+    (value.startsWith('{') && value.endsWith('}')) ||
+    (value.startsWith('[') && value.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(value) as JsonValue
+    } catch {
+      return rawValue
+    }
+  }
+
+  return rawValue
 }
 
 function inferColumns(rows: TableRow[]): string[] {
@@ -39,12 +66,53 @@ function inferType(values: Array<JsonValue | undefined>): string {
   return Array.from(types).join(' | ')
 }
 
+function getDefaultValueForColumn(rows: TableRow[], column: string): JsonValue {
+  const existingValue = rows.find((row) => row[column] !== undefined)?.[column]
+
+  if (column.toLowerCase() === 'id') {
+    const maxId = rows.reduce((max, row) => {
+      const id = row[column]
+      return typeof id === 'number' && id > max ? id : max
+    }, 0)
+
+    return maxId + 1
+  }
+
+  if (typeof existingValue === 'number') return 0
+  if (typeof existingValue === 'boolean') return false
+  if (Array.isArray(existingValue)) return []
+  if (existingValue !== null && typeof existingValue === 'object') return {}
+
+  return ''
+}
+
+function createEmptyRow(rows: TableRow[], columns: string[]): TableRow {
+  if (columns.length === 0) {
+    return {
+      id: 1
+    }
+  }
+
+  return columns.reduce<TableRow>((row, column) => {
+    row[column] = getDefaultValueForColumn(rows, column)
+    return row
+  }, {})
+}
+
+function cloneRow(row: TableRow): TableRow {
+  return JSON.parse(JSON.stringify(row)) as TableRow
+}
+
 function App(): JSX.Element {
-  const [db] = useState(mockDb)
+  const [db, setDb] = useState<FakeDb>(mockDb)
   const [selectedSchema, setSelectedSchema] = useState('main')
   const [selectedTable, setSelectedTable] = useState('students')
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('data')
   const [query, setQuery] = useState('SELECT * FROM students')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [filePath, setFilePath] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('Valid JSON')
 
   const schemas = Object.keys(db.schemas)
 
@@ -59,11 +127,177 @@ function App(): JSX.Element {
 
   const columns = useMemo(() => inferColumns(rows), [rows])
 
+  useEffect(() => {
+    setSelectedRowIndex(null)
+  }, [selectedSchema, selectedTable])
+
+  function updateCurrentTable(nextRows: TableRow[]): void {
+    setDb((currentDb) => ({
+      ...currentDb,
+      schemas: {
+        ...currentDb.schemas,
+        [selectedSchema]: {
+          ...currentDb.schemas[selectedSchema],
+          [selectedTable]: nextRows
+        }
+      }
+    }))
+
+    setHasUnsavedChanges(true)
+  }
+
   function handleSchemaClick(schemaName: string): void {
     const schemaTables = Object.keys(db.schemas[schemaName] ?? {})
 
     setSelectedSchema(schemaName)
     setSelectedTable(schemaTables[0] ?? '')
+  }
+
+  function handleCellChange(rowIndex: number, column: string, rawValue: string): void {
+    const nextRows = rows.map((row, currentIndex) => {
+      if (currentIndex !== rowIndex) return row
+
+      return {
+        ...row,
+        [column]: parseCellValue(rawValue)
+      }
+    })
+
+    updateCurrentTable(nextRows)
+  }
+
+  function handleAddRow(): void {
+    if (!selectedTable) return
+
+    const nextRow = createEmptyRow(rows, columns)
+    const nextRows = [...rows, nextRow]
+
+    updateCurrentTable(nextRows)
+    setSelectedRowIndex(nextRows.length - 1)
+  }
+
+  function handleDeleteRow(): void {
+    if (selectedRowIndex === null) return
+
+    const nextRows = rows.filter((_, rowIndex) => rowIndex !== selectedRowIndex)
+
+    updateCurrentTable(nextRows)
+    setSelectedRowIndex(null)
+  }
+
+  function handleDuplicateRow(): void {
+    if (selectedRowIndex === null) return
+
+    const selectedRow = rows[selectedRowIndex]
+    if (!selectedRow) return
+
+    const duplicatedRow = cloneRow(selectedRow)
+
+    if ('id' in duplicatedRow) {
+      duplicatedRow.id = getDefaultValueForColumn(rows, 'id')
+    }
+
+    const nextRows = [
+      ...rows.slice(0, selectedRowIndex + 1),
+      duplicatedRow,
+      ...rows.slice(selectedRowIndex + 1)
+    ]
+
+    updateCurrentTable(nextRows)
+    setSelectedRowIndex(selectedRowIndex + 1)
+  }
+
+  function getDatabaseContent(): string {
+    return JSON.stringify(db, null, 2)
+  }
+
+  function selectFirstAvailableTable(nextDb: FakeDb): void {
+    const nextSchemas = Object.keys(nextDb.schemas)
+    const firstSchema = nextSchemas[0] ?? ''
+    const firstTables = firstSchema ? Object.keys(nextDb.schemas[firstSchema] ?? {}) : []
+    const firstTable = firstTables[0] ?? ''
+
+    setSelectedSchema(firstSchema)
+    setSelectedTable(firstTable)
+    setSelectedRowIndex(null)
+  }
+
+  async function handleOpenDatabase(): Promise<void> {
+    try {
+      const result = await window.fakeDb.openDatabase()
+
+      if (result.canceled || !result.content) {
+        setStatusMessage('Open canceled')
+        return
+      }
+
+      const parsedJson = JSON.parse(result.content) as unknown
+      const nextDb = normalizeJsonToFakeDb(parsedJson)
+
+      setDb(nextDb)
+      setFilePath(result.filePath ?? null)
+      setHasUnsavedChanges(false)
+      selectFirstAvailableTable(nextDb)
+      setStatusMessage('Database opened')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function handleSaveDatabase(successMessage = 'Database saved'): Promise<void> {
+    if (!filePath) {
+      await handleSaveDatabaseAs(successMessage)
+      return
+    }
+
+    const result = await window.fakeDb.saveDatabase(filePath, getDatabaseContent())
+
+    if (result.success) {
+      setHasUnsavedChanges(false)
+      setStatusMessage(successMessage)
+      return
+    }
+
+    setStatusMessage(result.error ?? 'Save failed')
+  }
+
+  async function handleSaveDatabaseAs(successMessage = 'Database saved'): Promise<void> {
+    const result = await window.fakeDb.saveDatabaseAs(getDatabaseContent())
+
+    if (result.canceled) {
+      setStatusMessage('Save canceled')
+      return
+    }
+
+    if (result.success && result.filePath) {
+      setFilePath(result.filePath)
+      setHasUnsavedChanges(false)
+      setStatusMessage(successMessage)
+      return
+    }
+
+    setStatusMessage(result.error ?? 'Save failed')
+  }
+
+  async function handleApplyChanges(): Promise<void> {
+    await handleSaveDatabase('Changes applied to file')
+  }
+
+  function handleNewDatabase(): void {
+    const nextDb: FakeDb = {
+      version: '1.0.0',
+      schemas: {
+        main: {}
+      }
+    }
+
+    setDb(nextDb)
+    setFilePath(null)
+    setSelectedSchema('main')
+    setSelectedTable('')
+    setSelectedRowIndex(null)
+    setHasUnsavedChanges(true)
+    setStatusMessage('New database created')
   }
 
   return (
@@ -74,10 +308,16 @@ function App(): JSX.Element {
         </div>
 
         <div className="toolbar">
-          <button>New DB</button>
-          <button>Open DB</button>
-          <button>Save</button>
-          <button>Save As</button>
+          <button onClick={handleNewDatabase}>New DB</button>
+
+          <button onClick={() => void handleOpenDatabase()}>Open DB</button>
+
+          <button onClick={() => void handleSaveDatabase()} disabled={!hasUnsavedChanges}>
+            Save
+          </button>
+
+          <button onClick={() => void handleSaveDatabaseAs()}>Save As</button>
+
           <button className="primary">New Schema</button>
         </div>
       </header>
@@ -88,7 +328,7 @@ function App(): JSX.Element {
 
           <div className="connection-card">
             <div className="connection-name">Local JSON File</div>
-            <div className="connection-path">mock://database.json</div>
+            <div className="connection-path">{filePath ?? 'mock://database.json'}</div>
           </div>
 
           <div className="sidebar-title">SCHEMAS</div>
@@ -137,14 +377,26 @@ function App(): JSX.Element {
               </h2>
               <p>
                 {rows.length} rows · {columns.length} columns
+                {selectedRowIndex !== null && <> · selected row #{selectedRowIndex + 1}</>}
               </p>
             </div>
 
             <div className="workspace-actions">
-              <button>+ Row</button>
-              <button>Duplicate</button>
-              <button>Delete</button>
-              <button className="primary">Apply</button>
+              <button onClick={handleAddRow}>+ Row</button>
+              <button onClick={handleDuplicateRow} disabled={selectedRowIndex === null}>
+                Duplicate
+              </button>
+              <button onClick={handleDeleteRow} disabled={selectedRowIndex === null}>
+                Delete
+              </button>
+              <button
+                className="primary"
+                onClick={() => void handleApplyChanges()}
+                disabled={!hasUnsavedChanges}
+                title="Write current changes to the JSON file"
+              >
+                Apply
+              </button>
             </div>
           </div>
 
@@ -193,11 +445,24 @@ function App(): JSX.Element {
 
                   <tbody>
                     {rows.map((row, rowIndex) => (
-                      <tr key={rowIndex}>
+                      <tr
+                        key={rowIndex}
+                        className={selectedRowIndex === rowIndex ? 'selected-row' : ''}
+                        onClick={() => setSelectedRowIndex(rowIndex)}
+                      >
                         <td className="row-number">{rowIndex + 1}</td>
 
                         {columns.map((column) => (
-                          <td key={column}>{stringifyValue(row[column])}</td>
+                          <td key={column}>
+                            <input
+                              className="cell-input"
+                              value={stringifyValue(row[column])}
+                              onChange={(event) =>
+                                handleCellChange(rowIndex, column, event.target.value)
+                              }
+                              onFocus={() => setSelectedRowIndex(rowIndex)}
+                            />
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -205,7 +470,7 @@ function App(): JSX.Element {
                     {rows.length === 0 && (
                       <tr>
                         <td colSpan={columns.length + 1} className="empty-cell">
-                          Empty table
+                          Empty table. Click “+ Row” to create the first record.
                         </td>
                       </tr>
                     )}
@@ -279,9 +544,11 @@ function App(): JSX.Element {
       </main>
 
       <footer className="statusbar">
-        <span>Status: Valid JSON</span>
-        <span>Unsaved changes: no</span>
-        <span>Path: mock://database.json</span>
+        <span>Status: {statusMessage}</span>
+        <span className={hasUnsavedChanges ? 'dirty-status' : ''}>
+          Unsaved changes: {hasUnsavedChanges ? 'yes' : 'no'}
+        </span>
+        <span>Path: {filePath ?? 'mock://database.json'}</span>
       </footer>
     </div>
   )

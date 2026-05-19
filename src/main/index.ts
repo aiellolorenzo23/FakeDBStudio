@@ -1,7 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { readFile, writeFile } from 'fs/promises'
 
 function createWindow(): void {
   // Create the browser window.
@@ -38,6 +39,84 @@ function createWindow(): void {
 }
 
 app.setName('FakeDB Studio')
+
+ipcMain.handle('fake-db:open-database', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Open JSON Database',
+    properties: ['openFile'],
+    filters: [
+      {
+        name: 'JSON files',
+        extensions: ['json']
+      }
+    ]
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return {
+      canceled: true
+    }
+  }
+
+  const filePath = result.filePaths[0]
+  const content = await readFile(filePath, 'utf-8')
+
+  return {
+    canceled: false,
+    filePath,
+    content
+  }
+})
+
+ipcMain.handle('fake-db:save-database', async (_, filePath: string, content: string) => {
+  try {
+    await writeFile(filePath, content, 'utf-8')
+
+    return {
+      success: true,
+      filePath
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+})
+
+ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
+  const result = await dialog.showSaveDialog({
+    title: 'Save JSON Database As',
+    defaultPath: 'database.json',
+    filters: [
+      {
+        name: 'JSON files',
+        extensions: ['json']
+      }
+    ]
+  })
+
+  if (result.canceled || !result.filePath) {
+    return {
+      success: false,
+      canceled: true
+    }
+  }
+
+  try {
+    await writeFile(result.filePath, content, 'utf-8')
+
+    return {
+      success: true,
+      filePath: result.filePath
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+})
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

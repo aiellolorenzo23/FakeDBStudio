@@ -44,6 +44,50 @@ button.primary:hover {
   background: #0369a1;
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: #1e293b;
+}
+
+.selected-row td {
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.selected-row:hover td {
+  background: rgba(14, 165, 233, 0.18) !important;
+}
+
+.cell-input {
+  width: 100%;
+  min-width: 80px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e5e7eb;
+  font: inherit;
+  outline: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.cell-input:hover {
+  border-color: rgba(56, 189, 248, 0.25);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.cell-input:focus {
+  border-color: #38bdf8;
+  background: #020617;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
+}
+
+.dirty-status {
+  color: #facc15;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: 82px 1fr 28px;
