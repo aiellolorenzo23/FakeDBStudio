@@ -103,7 +103,7 @@ async function pushRecentFile(filePath: string): Promise<void> {
   await writeLastOpenedFile(filePath)
 }
 
-async function removeRecentFile(filePath: string): Promise<void> {
+async function removeRecentFile(filePath: string): Promise<string[]> {
   const currentRecentFiles = await readRecentFiles()
   const nextRecentFiles = currentRecentFiles.filter((entry) => entry !== filePath)
   const currentLastOpenedFile = await readLastOpenedFile()
@@ -113,6 +113,8 @@ async function removeRecentFile(filePath: string): Promise<void> {
   if (currentLastOpenedFile === filePath) {
     await writeLastOpenedFile(null)
   }
+
+  return nextRecentFiles
 }
 
 function createWindow(): void {
@@ -236,6 +238,10 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
 
 ipcMain.handle('fake-db:get-recent-files', async () => {
   return readRecentFiles()
+})
+
+ipcMain.handle('fake-db:remove-recent-file', async (_, filePath: string) => {
+  return removeRecentFile(filePath)
 })
 
 ipcMain.handle('fake-db:get-last-opened-file', async () => {

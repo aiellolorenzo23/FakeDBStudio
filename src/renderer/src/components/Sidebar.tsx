@@ -21,6 +21,7 @@ type SidebarProps = {
   onRenameTable: () => void
   onDeleteTable: () => void
   onOpenRecentFile: (filePath: string) => void
+  onRemoveRecentFile: (filePath: string) => void
 }
 
 function Sidebar({
@@ -41,7 +42,8 @@ function Sidebar({
   onDeleteSchema,
   onRenameTable,
   onDeleteTable,
-  onOpenRecentFile
+  onOpenRecentFile,
+  onRemoveRecentFile
 }: SidebarProps): React.JSX.Element {
   return (
     <aside className="sidebar">
@@ -62,16 +64,26 @@ function Sidebar({
           <div className="sidebar-action-group">
             <div className="table-list recent-files-list">
               {recentFiles.map((recentFile) => (
-                <button
-                  key={recentFile}
-                  className="table-name"
-                  onClick={() => onOpenRecentFile(recentFile)}
-                >
-                  <span className="table-icon">↺</span>
-                  <span className="connection-path" title={recentFile}>
-                    {recentFile}
-                  </span>
-                </button>
+                <div key={recentFile} className="recent-file-item">
+                  <button
+                    className="table-name recent-file-open"
+                    onClick={() => onOpenRecentFile(recentFile)}
+                  >
+                    <span className="table-icon">?</span>
+                    <span className="connection-path" title={recentFile}>
+                      {recentFile}
+                    </span>
+                  </button>
+
+                  <button
+                    className="recent-file-remove"
+                    onClick={() => onRemoveRecentFile(recentFile)}
+                    title={`Remove recent file: ${recentFile}`}
+                    aria-label={`Remove recent file: ${recentFile}`}
+                  >
+                    x
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -88,7 +100,7 @@ function Sidebar({
               onClick={() => onSchemaClick(schemaName)}
               onContextMenu={(event) => onSchemaContextMenu(event, schemaName)}
             >
-              ▾ {schemaName}
+              ? {schemaName}
             </button>
 
             {selectedSchema === schemaName && (
@@ -100,7 +112,7 @@ function Sidebar({
                     onClick={() => onTableClick(tableName)}
                     onContextMenu={(event) => onTableContextMenu(event, schemaName, tableName)}
                   >
-                    <span className="table-icon">▪</span>
+                    <span className="table-icon">?</span>
                     {tableName}
                   </button>
                 ))}

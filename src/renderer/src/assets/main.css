@@ -238,6 +238,27 @@ button:disabled:hover {
   padding-right: 4px;
 }
 
+.recent-file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.recent-file-open {
+  min-width: 0;
+}
+
+.recent-file-remove {
+  min-width: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.18);
+  color: #fca5a5;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .table-name {
   display: flex;
   align-items: center;

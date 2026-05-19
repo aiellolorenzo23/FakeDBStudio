@@ -19,6 +19,8 @@ export interface FakeDbApi {
 
   getRecentFiles: () => Promise<string[]>
 
+  removeRecentFile: (filePath: string) => Promise<string[]>
+
   getLastOpenedFile: () => Promise<string | null>
 
   getQueryHistory: () => Promise<string[]>

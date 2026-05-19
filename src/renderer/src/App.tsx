@@ -1127,6 +1127,14 @@ function App(): JSX.Element {
           onOpenRecentFile={(nextFilePath) =>
             requestPendingChangesConfirmation(() => handleOpenRecentDatabase(nextFilePath))
           }
+          onRemoveRecentFile={(nextFilePath) => {
+            void window.fakeDb
+              .removeRecentFile(nextFilePath)
+              .then((nextRecentFiles) => {
+                setRecentFiles(nextRecentFiles)
+              })
+              .catch(() => {})
+          }}
         />
 
         <section className="workspace">
