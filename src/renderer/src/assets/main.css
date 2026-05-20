@@ -181,7 +181,6 @@ button:disabled:hover {
 }
 
 .connection-path {
-  margin-top: 6px;
   color: #94a3b8;
   font-size: 11px;
   line-height: 1.35;
@@ -192,11 +191,20 @@ button:disabled:hover {
   font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
 }
 
-.connection-format {
+.connection-meta {
   margin-top: 8px;
-  color: #7dd3fc;
   font-size: 11px;
+  line-height: 1.35;
+}
+
+.connection-meta-label,
+.connection-meta-value {
+  color: #7dd3fc;
   font-weight: 700;
+}
+
+.connection-meta .connection-path {
+  display: inline;
 }
 
 .schema-tree {
@@ -248,8 +256,27 @@ button:disabled:hover {
   min-width: 0;
 }
 
-.recent-file-open .connection-path {
-  margin-top: 0;
+.recent-file-content {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.recent-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #94a3b8;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
 }
 
 .recent-file-remove {

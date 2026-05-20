@@ -2,6 +2,7 @@ import type { FakeDb } from '../model/fakeDb'
 
 export const mockDb: FakeDb = {
   version: '1.0.0',
+  database: 'mock',
   schemas: {
     main: {
       students: [

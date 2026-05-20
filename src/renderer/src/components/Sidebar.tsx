@@ -1,7 +1,10 @@
+import type { RecentFileEntry } from '../types/recentFile'
+
 type SidebarProps = {
+  databaseName: string
   displayedFilePath: string
   sourceFormatLabel: string
-  recentFiles: string[]
+  recentFiles: RecentFileEntry[]
   schemas: string[]
   selectedSchema: string
   selectedTable: string
@@ -25,6 +28,7 @@ type SidebarProps = {
 }
 
 function Sidebar({
+  databaseName,
   displayedFilePath,
   sourceFormatLabel,
   recentFiles,
@@ -51,10 +55,18 @@ function Sidebar({
 
       <div className="connection-card">
         <div className="connection-name">Local JSON File</div>
-        <div className="connection-path" title={displayedFilePath}>
-          {displayedFilePath}
+        <div className="connection-meta">
+          <span className="connection-meta-label">Database name:</span>{' '}
+          <span className="connection-meta-value">{databaseName}</span>
         </div>
-        <div className="connection-format">Format: {sourceFormatLabel}</div>
+        <div className="connection-meta" title={displayedFilePath}>
+          <span className="connection-meta-label">Path:</span>{' '}
+          <span className="connection-path">{displayedFilePath}</span>
+        </div>
+        <div className="connection-meta">
+          <span className="connection-meta-label">Format:</span>{' '}
+          <span className="connection-meta-value">{sourceFormatLabel}</span>
+        </div>
       </div>
 
       {recentFiles.length > 0 && (
@@ -64,22 +76,23 @@ function Sidebar({
           <div className="sidebar-action-group">
             <div className="table-list recent-files-list">
               {recentFiles.map((recentFile) => (
-                <div key={recentFile} className="recent-file-item">
+                <div key={recentFile.filePath} className="recent-file-item">
                   <button
                     className="table-name recent-file-open"
-                    onClick={() => onOpenRecentFile(recentFile)}
+                    onClick={() => onOpenRecentFile(recentFile.filePath)}
                   >
                     <span className="table-icon">{'\u21BA'}</span>
-                    <span className="connection-path" title={recentFile}>
-                      {recentFile}
+                    <span className="recent-file-content" title={recentFile.filePath}>
+                      <span className="recent-file-name">{recentFile.databaseName}</span>
+                      <span className="recent-file-path">{recentFile.filePath}</span>
                     </span>
                   </button>
 
                   <button
                     className="recent-file-remove"
-                    onClick={() => onRemoveRecentFile(recentFile)}
-                    title={`Remove recent file: ${recentFile}`}
-                    aria-label={`Remove recent file: ${recentFile}`}
+                    onClick={() => onRemoveRecentFile(recentFile.filePath)}
+                    title={`Remove recent file: ${recentFile.filePath}`}
+                    aria-label={`Remove recent file: ${recentFile.filePath}`}
                   >
                     x
                   </button>

@@ -14,10 +14,15 @@ export interface SaveDatabaseResult {
   error?: string
 }
 
+export interface RecentFileEntry {
+  filePath: string
+  databaseName: string
+}
+
 export interface FakeDbApi {
   openDatabase: () => Promise<OpenDatabaseResult>
 
-  getRecentFiles: () => Promise<string[]>
+  getRecentFiles: () => Promise<RecentFileEntry[]>
 
   removeRecentFile: (filePath: string) => Promise<string[]>
 

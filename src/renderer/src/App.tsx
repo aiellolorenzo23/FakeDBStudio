@@ -32,6 +32,7 @@ import {
 } from './lib/tableUtils'
 import type { PersistedDatabaseContent, SourceFormat } from './lib/fakeDbFormat'
 import type { FakeDb, TableRow } from './model/fakeDb'
+import type { RecentFileEntry } from './types/recentFile'
 import type { ConfirmDialogState, ContextMenuState, DialogMode } from './types/ui'
 import { normalizeJsonToFakeDb } from './model/normalizeFakeDb'
 
@@ -42,6 +43,16 @@ type TableSortState = {
   column: string
   direction: SortDirection
 } | null
+
+function getDatabaseNameFromPath(filePath: string | null): string {
+  if (!filePath) return 'database'
+
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  const fileName = normalizedPath.split('/').pop() ?? ''
+  const databaseName = fileName.replace(/\.[^.]+$/, '').trim()
+
+  return databaseName || 'database'
+}
 
 function App(): JSX.Element {
   const [db, setDb] = useState<FakeDb>(mockDb)
@@ -54,7 +65,7 @@ function App(): JSX.Element {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('Valid JSON')
-  const [recentFiles, setRecentFiles] = useState<string[]>([])
+  const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([])
   const [dialogMode, setDialogMode] = useState<DialogMode>(null)
   const [schemaNameInput, setSchemaNameInput] = useState('')
   const [tableNameInput, setTableNameInput] = useState('')
@@ -262,7 +273,7 @@ function App(): JSX.Element {
   const applyOpenedDatabase = useCallback(
     (content: string, nextFilePath: string | null): void => {
       const parsedJson = JSON.parse(content) as unknown
-      const nextDb = normalizeJsonToFakeDb(parsedJson)
+      const nextDb = normalizeJsonToFakeDb(parsedJson, getDatabaseNameFromPath(nextFilePath))
       const nextSourceFormat = detectSourceFormat(parsedJson)
 
       setDb(nextDb)
@@ -403,6 +414,7 @@ function App(): JSX.Element {
   function handleNewDatabase(): void {
     const nextDb: FakeDb = {
       version: '1.0.0',
+      database: 'database',
       schemas: {
         main: {}
       }
@@ -1107,6 +1119,7 @@ function App(): JSX.Element {
 
       <main className="main-layout">
         <Sidebar
+          databaseName={db.database}
           displayedFilePath={displayedFilePath}
           sourceFormatLabel={getSourceFormatLabel(sourceFormat)}
           recentFiles={recentFiles}
@@ -1130,8 +1143,8 @@ function App(): JSX.Element {
           onRemoveRecentFile={(nextFilePath) => {
             void window.fakeDb
               .removeRecentFile(nextFilePath)
-              .then((nextRecentFiles) => {
-                setRecentFiles(nextRecentFiles)
+              .then(() => {
+                void refreshRecentFiles()
               })
               .catch(() => {})
           }}

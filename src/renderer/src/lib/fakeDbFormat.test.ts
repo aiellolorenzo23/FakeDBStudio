@@ -10,7 +10,7 @@ describe('fakeDbFormat', () => {
   it('detects source formats correctly', () => {
     expect(detectSourceFormat([])).toBe('rootArray')
     expect(detectSourceFormat({ users: [] })).toBe('plainObject')
-    expect(detectSourceFormat({ version: '1.0.0', schemas: {} })).toBe('fakeDb')
+    expect(detectSourceFormat({ version: '1.0.0', database: 'test', schemas: {} })).toBe('fakeDb')
   })
 
   it('returns readable labels', () => {
@@ -20,6 +20,7 @@ describe('fakeDbFormat', () => {
   it('preserves root array format when structure is compatible', () => {
     const db: FakeDb = {
       version: '1.0.0',
+      database: 'test',
       schemas: {
         main: {
           root: [{ id: 1 }]
@@ -37,6 +38,7 @@ describe('fakeDbFormat', () => {
   it('falls back to FakeDB when plain object can no longer be preserved', () => {
     const db: FakeDb = {
       version: '1.0.0',
+      database: 'test',
       schemas: {
         main: {
           users: [{ id: 1 }],
@@ -53,5 +55,21 @@ describe('fakeDbFormat', () => {
     expect(result.formatLabel).toBe('FakeDB')
     expect(result.fallbackToFakeDb).toBe(true)
     expect(JSON.parse(result.content)).toEqual(db)
+  })
+
+  it('serializes FakeDB with database before schemas', () => {
+    const db: FakeDb = {
+      version: '1.0.0',
+      database: 'academy',
+      schemas: {
+        main: {
+          users: [{ id: 1 }]
+        }
+      }
+    }
+
+    const result = buildPersistedDatabaseContent(db, 'fakeDb')
+
+    expect(result.content.indexOf('"database"')).toBeLessThan(result.content.indexOf('"schemas"'))
   })
 })

@@ -20,6 +20,7 @@ export interface JsonSchema {
 
 export interface FakeDb {
   version: string
+  database: string
   schemas: {
     [schemaName: string]: JsonSchema
   }

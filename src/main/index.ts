@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
-import { join } from 'path'
+import { basename, extname, join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { mkdir, readFile, writeFile } from 'fs/promises'
@@ -9,6 +9,61 @@ const QUERY_HISTORY_LIMIT = 20
 const recentFilesPath = join(app.getPath('userData'), 'recent-files.json')
 const lastOpenedFilePath = join(app.getPath('userData'), 'last-opened-file.json')
 const queryHistoryPath = join(app.getPath('userData'), 'query-history.json')
+
+type RecentFileEntry = {
+  filePath: string
+  databaseName: string
+}
+
+function getDatabaseNameFromFilePath(filePath: string): string {
+  const extension = extname(filePath)
+  const fileName = basename(filePath, extension).trim()
+
+  return fileName || 'database'
+}
+
+function parseDatabaseNameFromContent(content: string, fallbackName: string): string {
+  try {
+    const parsed = JSON.parse(content) as unknown
+
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'database' in parsed &&
+      typeof parsed.database === 'string' &&
+      parsed.database.trim().length > 0
+    ) {
+      return parsed.database.trim()
+    }
+  } catch {
+    return fallbackName
+  }
+
+  return fallbackName
+}
+
+async function buildRecentFileEntry(filePath: string): Promise<RecentFileEntry> {
+  const fallbackName = getDatabaseNameFromFilePath(filePath)
+
+  try {
+    const content = await readFile(filePath, 'utf-8')
+
+    return {
+      filePath,
+      databaseName: parseDatabaseNameFromContent(content, fallbackName)
+    }
+  } catch {
+    return {
+      filePath,
+      databaseName: fallbackName
+    }
+  }
+}
+
+async function readRecentFileEntries(): Promise<RecentFileEntry[]> {
+  const recentFiles = await readRecentFiles()
+  return Promise.all(recentFiles.map((filePath) => buildRecentFileEntry(filePath)))
+}
 
 async function readRecentFiles(): Promise<string[]> {
   try {
@@ -237,7 +292,7 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
 })
 
 ipcMain.handle('fake-db:get-recent-files', async () => {
-  return readRecentFiles()
+  return readRecentFileEntries()
 })
 
 ipcMain.handle('fake-db:remove-recent-file', async (_, filePath: string) => {

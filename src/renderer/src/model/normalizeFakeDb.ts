@@ -17,9 +17,31 @@ function isFakeDb(value: JsonValue | unknown): value is FakeDb {
   return isObject(value.schemas)
 }
 
-export function normalizeJsonToFakeDb(value: JsonValue | unknown): FakeDb {
+function resolveDatabaseName(
+  value: JsonValue | unknown,
+  fallbackDatabaseName = 'database'
+): string {
+  if (
+    isObject(value) &&
+    typeof value.database === 'string' &&
+    value.database.trim().length > 0
+  ) {
+    return value.database.trim()
+  }
+
+  return fallbackDatabaseName
+}
+
+export function normalizeJsonToFakeDb(
+  value: JsonValue | unknown,
+  fallbackDatabaseName = 'database'
+): FakeDb {
   if (isFakeDb(value)) {
-    return value
+    return {
+      version: typeof value.version === 'string' ? value.version : '1.0.0',
+      database: resolveDatabaseName(value, fallbackDatabaseName),
+      schemas: value.schemas as FakeDb['schemas']
+    }
   }
 
   if (Array.isArray(value)) {
@@ -29,6 +51,7 @@ export function normalizeJsonToFakeDb(value: JsonValue | unknown): FakeDb {
 
     return {
       version: '1.0.0',
+      database: fallbackDatabaseName,
       schemas: {
         main: {
           root: value
@@ -59,6 +82,7 @@ export function normalizeJsonToFakeDb(value: JsonValue | unknown): FakeDb {
 
     return {
       version: '1.0.0',
+      database: fallbackDatabaseName,
       schemas: {
         main: tables
       }
