@@ -170,7 +170,7 @@ jobs:
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md
           else
-            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md
+            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md --draft=false
           fi
 
           gh release upload "$TAG_NAME" "${files[@]}" --clobber
