@@ -105,6 +105,9 @@ jobs:
       - build-linux
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -114,6 +117,39 @@ jobs:
 
       - name: List collected assets
         run: find release-assets -maxdepth 1 -type f | sort
+
+      - name: Prepare release notes from changelog
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $lines = Get-Content CHANGELOG.md
+          $start = -1
+          $end = $lines.Length
+
+          for ($i = 0; $i -lt $lines.Length; $i++) {
+            if ($lines[$i] -match "^## \[$([regex]::Escape($version))\]") {
+              $start = $i
+              continue
+            }
+
+            if ($start -ge 0 -and $i -gt $start -and $lines[$i] -match '^## \[') {
+              $end = $i
+              break
+            }
+          }
+
+          if ($start -lt 0) {
+            throw "No changelog section found for version $version"
+          }
+
+          $section = $lines[($start + 1)..($end - 1)]
+          $content = @(
+            "Release $version"
+            ""
+            $section
+          ) -join "`n"
+
+          Set-Content -Path release-notes.md -Value $content
 
       - name: Create or update GitHub release
         env:
@@ -132,7 +168,9 @@ jobs:
           fi
 
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release create "$TAG_NAME" --draft --title "$TAG_NAME"
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md
+          else
+            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md
           fi
 
           gh release upload "$TAG_NAME" "${files[@]}" --clobber
