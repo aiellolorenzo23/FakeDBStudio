@@ -1566,6 +1566,7 @@ function App(): JSX.Element {
       <StatusBar
         statusMessage={statusMessage}
         hasUnsavedChanges={hasUnsavedChanges}
+        hasExternalFileChange={hasExternalFileChange}
         filePath={filePath}
       />
     </div>

@@ -94,6 +94,10 @@ button:disabled:hover {
   color: #facc15;
 }
 
+.external-change-status {
+  color: #f59e0b;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: 82px 1fr 28px;
@@ -609,7 +613,7 @@ button:disabled:hover {
 
 .statusbar {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto auto auto 1fr;
   align-items: center;
   gap: 18px;
   padding: 0 12px;

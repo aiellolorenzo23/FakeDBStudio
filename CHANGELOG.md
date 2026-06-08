@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted to the current needs of this project.
 
+## [1.0.1] - 2026-06-08
+
+### Added
+
+- Manual `Reload` action for re-reading the currently opened database from disk.
+- Automatic file watching for externally modified database files.
+- Status bar indicator for pending external file changes.
+- Conflict prompt when a database changes on disk while local edits are still pending.
+
+### Changed
+
+- Automatically reload the current database when the file changes on disk and there are no local unsaved edits.
+- Preserve the current schema and table selection when reloading from disk whenever possible.
+- Re-run the last executed query after a successful reload so query results stay aligned with the current file contents.
+
+### Fixed
+
+- Fixed a selection reset regression that could keep the UI on the same table after the external reload integration.
+
 ## [1.0.0] - 2026-06-08
 
 ### Added
