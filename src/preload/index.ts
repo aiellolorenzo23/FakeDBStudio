@@ -22,10 +22,26 @@ const fakeDbApi = {
   openRecentDatabase: (filePath: string) =>
     ipcRenderer.invoke('fake-db:open-recent-database', filePath),
 
+  reloadDatabase: (filePath: string) => ipcRenderer.invoke('fake-db:reload-database', filePath),
+
   saveDatabase: (filePath: string, content: string) =>
     ipcRenderer.invoke('fake-db:save-database', filePath, content),
 
-  saveDatabaseAs: (content: string) => ipcRenderer.invoke('fake-db:save-database-as', content)
+  saveDatabaseAs: (content: string) => ipcRenderer.invoke('fake-db:save-database-as', content),
+
+  watchDatabase: (filePath: string | null) => ipcRenderer.invoke('fake-db:watch-database', filePath),
+
+  onDatabaseFileChanged: (callback: (payload: { filePath: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { filePath: string }): void => {
+      callback(payload)
+    }
+
+    ipcRenderer.on('fake-db:database-file-changed', listener)
+
+    return () => {
+      ipcRenderer.removeListener('fake-db:database-file-changed', listener)
+    }
+  }
 }
 
 if (process.contextIsolated) {

@@ -14,6 +14,18 @@ export interface SaveDatabaseResult {
   error?: string
 }
 
+export interface ReloadDatabaseResult {
+  success: boolean
+  filePath?: string
+  content?: string
+  error?: string
+}
+
+export interface WatchDatabaseResult {
+  success: boolean
+  error?: string
+}
+
 export interface RecentFileEntry {
   filePath: string
   databaseName: string
@@ -36,9 +48,15 @@ export interface FakeDbApi {
 
   openRecentDatabase: (filePath: string) => Promise<OpenDatabaseResult>
 
+  reloadDatabase: (filePath: string) => Promise<ReloadDatabaseResult>
+
   saveDatabase: (filePath: string, content: string) => Promise<SaveDatabaseResult>
 
   saveDatabaseAs: (content: string) => Promise<SaveDatabaseResult>
+
+  watchDatabase: (filePath: string | null) => Promise<WatchDatabaseResult>
+
+  onDatabaseFileChanged: (callback: (payload: { filePath: string }) => void) => () => void
 }
 
 declare global {

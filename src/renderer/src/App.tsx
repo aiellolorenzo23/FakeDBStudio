@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import logoImage from './assets/brand/logo.png'
 import ContextMenu from './components/ContextMenu'
@@ -44,6 +44,12 @@ type TableSortState = {
   direction: SortDirection
 } | null
 
+type QueryExecutionResult = {
+  rows: TableRow[]
+  error: string | null
+  statusMessage: string
+}
+
 function getDatabaseNameFromPath(filePath: string | null): string {
   if (!filePath) return 'database'
 
@@ -55,6 +61,7 @@ function getDatabaseNameFromPath(filePath: string | null): string {
 }
 
 function App(): JSX.Element {
+  const hasInitializedRef = useRef(false)
   const [db, setDb] = useState<FakeDb>(mockDb)
   const [selectedSchema, setSelectedSchema] = useState('main')
   const [selectedTable, setSelectedTable] = useState('students')
@@ -82,6 +89,7 @@ function App(): JSX.Element {
   const [queryHasRun, setQueryHasRun] = useState(false)
   const [tableFilter, setTableFilter] = useState('')
   const [tableSort, setTableSort] = useState<TableSortState>(null)
+  const [hasExternalFileChange, setHasExternalFileChange] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [sourceFormat, setSourceFormat] = useState<SourceFormat>('fakeDb')
@@ -229,6 +237,49 @@ function App(): JSX.Element {
     return buildPersistedDatabaseContent(db, sourceFormat)
   }
 
+  const runQueryAgainstDb = useCallback(
+    (database: FakeDb, queryText: string, fallbackSchema: string): QueryExecutionResult => {
+      try {
+        const parsedQuery = parseSelectQuery(queryText)
+        const schemaToUse = parsedQuery.schemaName ?? fallbackSchema
+        const tableRows = database.schemas[schemaToUse]?.[parsedQuery.tableName]
+
+        if (!tableRows) {
+          return {
+            rows: [],
+            error: `Table "${schemaToUse}.${parsedQuery.tableName}" not found`,
+            statusMessage: 'Query failed'
+          }
+        }
+
+        const filteredQueryRows = parsedQuery.where
+          ? tableRows.filter((row) =>
+              compareValues(
+                row[parsedQuery.where!.field],
+                parsedQuery.where!.operator,
+                parsedQuery.where!.value
+              )
+            )
+          : tableRows
+
+        const projectedRows = filteredQueryRows.map((row) => projectRow(row, parsedQuery.fields))
+
+        return {
+          rows: projectedRows,
+          error: null,
+          statusMessage: `Query executed: ${projectedRows.length} row(s)`
+        }
+      } catch (error) {
+        return {
+          rows: [],
+          error: error instanceof Error ? error.message : String(error),
+          statusMessage: 'Query failed'
+        }
+      }
+    },
+    []
+  )
+
   const resetTableUiState = useCallback((): void => {
     setTableFilter('')
     setTableSort(null)
@@ -252,6 +303,26 @@ function App(): JSX.Element {
     [resetTableUiState]
   )
 
+  const selectBestAvailableTable = useCallback(
+    (nextDb: FakeDb, preferredSchema: string, preferredTable: string): string => {
+      const nextSchemas = Object.keys(nextDb.schemas)
+      const fallbackSchema = nextSchemas[0] ?? ''
+      const nextSelectedSchema = preferredSchema && nextDb.schemas[preferredSchema] ? preferredSchema : fallbackSchema
+      const nextTables = nextSelectedSchema ? Object.keys(nextDb.schemas[nextSelectedSchema] ?? {}) : []
+      const nextSelectedTable =
+        preferredTable && nextDb.schemas[nextSelectedSchema]?.[preferredTable]
+          ? preferredTable
+          : (nextTables[0] ?? '')
+
+      setSelectedSchema(nextSelectedSchema)
+      setSelectedTable(nextSelectedTable)
+      resetTableUiState()
+
+      return nextSelectedSchema
+    },
+    [resetTableUiState]
+  )
+
   const refreshRecentFiles = useCallback(async (): Promise<void> => {
     try {
       const nextRecentFiles = await window.fakeDb.getRecentFiles()
@@ -271,19 +342,47 @@ function App(): JSX.Element {
   }, [])
 
   const applyOpenedDatabase = useCallback(
-    (content: string, nextFilePath: string | null): void => {
+    (
+      content: string,
+      nextFilePath: string | null,
+      options?: {
+        preserveSelection?: boolean
+        statusMessage?: string
+      }
+    ): void => {
       const parsedJson = JSON.parse(content) as unknown
       const nextDb = normalizeJsonToFakeDb(parsedJson, getDatabaseNameFromPath(nextFilePath))
       const nextSourceFormat = detectSourceFormat(parsedJson)
+      const preferredSchema = options?.preserveSelection ? selectedSchema : ''
+      const preferredTable = options?.preserveSelection ? selectedTable : ''
 
       setDb(nextDb)
       setSourceFormat(nextSourceFormat)
       setFilePath(nextFilePath)
       setHasUnsavedChanges(false)
-      selectFirstAvailableTable(nextDb)
-      setStatusMessage(`Database opened as ${getSourceFormatLabel(nextSourceFormat)}`)
+      setHasExternalFileChange(false)
+
+      const nextSelectedSchema =
+        options?.preserveSelection && preferredSchema
+          ? selectBestAvailableTable(nextDb, preferredSchema, preferredTable)
+          : (selectFirstAvailableTable(nextDb), Object.keys(nextDb.schemas)[0] ?? '')
+
+      if (queryHasRun) {
+        const queryResult = runQueryAgainstDb(nextDb, query, nextSelectedSchema)
+        setQueryResultRows(queryResult.rows)
+        setQueryError(queryResult.error)
+        setQueryHasRun(true)
+      } else {
+        setQueryResultRows([])
+        setQueryError(null)
+        setQueryHasRun(false)
+      }
+
+      setStatusMessage(
+        options?.statusMessage ?? `Database opened as ${getSourceFormatLabel(nextSourceFormat)}`
+      )
     },
-    [selectFirstAvailableTable]
+    [query, queryHasRun, runQueryAgainstDb, selectBestAvailableTable, selectFirstAvailableTable, selectedSchema, selectedTable]
   )
 
   const handleOpenRecentDatabase = useCallback(
@@ -313,6 +412,12 @@ function App(): JSX.Element {
   )
 
   useEffect(() => {
+    if (hasInitializedRef.current) {
+      return
+    }
+
+    hasInitializedRef.current = true
+
     const loadInitialSidebarState = async (): Promise<void> => {
       await Promise.allSettled([refreshRecentFiles(), refreshQueryHistory()])
     }
@@ -332,6 +437,116 @@ function App(): JSX.Element {
         void loadInitialSidebarState()
       })
   }, [handleOpenRecentDatabase, refreshQueryHistory, refreshRecentFiles])
+
+  const performReloadFromDisk = useCallback(
+    async (statusMessageOverride: string): Promise<void> => {
+      if (!filePath) {
+        setStatusMessage('No opened file to reload')
+        return
+      }
+
+      const result = await window.fakeDb.reloadDatabase(filePath)
+
+      if (!result.success || !result.content) {
+        setStatusMessage(result.error ?? 'Reload failed')
+        return
+      }
+
+      applyOpenedDatabase(result.content, result.filePath ?? filePath, {
+        preserveSelection: true,
+        statusMessage: statusMessageOverride
+      })
+    },
+    [applyOpenedDatabase, filePath]
+  )
+
+  const handleReloadDatabase = useCallback(
+    async (options?: {
+      forceDiscardChanges?: boolean
+      source?: 'manual' | 'external-auto' | 'external-manual'
+    }): Promise<void> => {
+      if (!filePath) {
+        setStatusMessage('No opened file to reload')
+        return
+      }
+
+      if (!options?.forceDiscardChanges && (hasUnsavedChanges || isRawDirty)) {
+        setConfirmDialog({
+          title: 'Reload from disk',
+          message:
+            'Reloading the current database will discard your local unsaved changes and reload the file from disk.',
+          confirmLabel: 'Cancel',
+          confirmKind: 'danger',
+          onConfirm: async () => {
+            setConfirmDialog(null)
+          },
+          saveAndContinueLabel: 'Reload from disk',
+          onSaveAndContinue: async () => {
+            setConfirmDialog(null)
+            await handleReloadDatabase({
+              forceDiscardChanges: true,
+              source: options?.source ?? 'manual'
+            })
+          }
+        })
+        return
+      }
+
+      const nextStatusMessage =
+        options?.source === 'external-auto'
+          ? 'Database reloaded from disk after external changes'
+          : options?.source === 'external-manual'
+            ? 'Database reloaded from disk'
+            : 'Database reloaded from disk'
+
+      await performReloadFromDisk(nextStatusMessage)
+    },
+    [filePath, hasUnsavedChanges, isRawDirty, performReloadFromDisk]
+  )
+
+  useEffect(() => {
+    void window.fakeDb.watchDatabase(filePath)
+
+    return () => {
+      void window.fakeDb.watchDatabase(null)
+    }
+  }, [filePath])
+
+  useEffect(() => {
+    return window.fakeDb.onDatabaseFileChanged(({ filePath: changedFilePath }) => {
+      if (!filePath || changedFilePath !== filePath) {
+        return
+      }
+
+      if (!hasUnsavedChanges && !isRawDirty) {
+        void handleReloadDatabase({
+          source: 'external-auto'
+        })
+        return
+      }
+
+      setHasExternalFileChange(true)
+      setStatusMessage('File changed on disk. Reload to view external updates.')
+      setConfirmDialog({
+        title: 'File changed on disk',
+        message:
+          'The opened database was modified outside FakeDB Studio. Reloading now will discard your current local changes.',
+        confirmLabel: 'Keep current changes',
+        confirmKind: 'danger',
+        onConfirm: async () => {
+          setConfirmDialog(null)
+        },
+        saveAndContinueLabel: 'Reload from disk',
+        onSaveAndContinue: async () => {
+          setConfirmDialog(null)
+          await handleReloadDatabase({
+            forceDiscardChanges: true,
+            source: 'external-manual'
+          })
+        }
+      })
+    })
+  }, [filePath, handleReloadDatabase, hasUnsavedChanges, isRawDirty])
 
   async function handleOpenDatabase(): Promise<void> {
     try {
@@ -359,6 +574,7 @@ function App(): JSX.Element {
 
     if (result.success) {
       setHasUnsavedChanges(false)
+      setHasExternalFileChange(false)
       await refreshRecentFiles()
 
       if (persistedContent.fallbackToFakeDb) {
@@ -389,6 +605,7 @@ function App(): JSX.Element {
     if (result.success && result.filePath) {
       setFilePath(result.filePath)
       setHasUnsavedChanges(false)
+      setHasExternalFileChange(false)
       await refreshRecentFiles()
 
       if (persistedContent.fallbackToFakeDb) {
@@ -427,6 +644,7 @@ function App(): JSX.Element {
     setSelectedTable('')
     resetTableUiState()
     setHasUnsavedChanges(true)
+    setHasExternalFileChange(false)
     setStatusMessage('New database created')
   }
 
@@ -901,47 +1119,19 @@ function App(): JSX.Element {
   }
 
   function handleExecuteQuery(): void {
-    try {
-      const parsedQuery = parseSelectQuery(query)
-      void window.fakeDb
-        .pushQueryHistoryEntry(query)
-        .then((nextQueryHistory) => {
-          setQueryHistory(nextQueryHistory)
-        })
-        .catch(() => {})
-      const schemaToUse = parsedQuery.schemaName ?? selectedSchema
-      const tableRows = db.schemas[schemaToUse]?.[parsedQuery.tableName]
+    void window.fakeDb
+      .pushQueryHistoryEntry(query)
+      .then((nextQueryHistory) => {
+        setQueryHistory(nextQueryHistory)
+      })
+      .catch(() => {})
 
-      if (!tableRows) {
-        setQueryResultRows([])
-        setQueryError(`Table "${schemaToUse}.${parsedQuery.tableName}" not found`)
-        setQueryHasRun(true)
-        setStatusMessage('Query failed')
-        return
-      }
+    const queryResult = runQueryAgainstDb(db, query, selectedSchema)
 
-      const filteredRows = parsedQuery.where
-        ? tableRows.filter((row) =>
-            compareValues(
-              row[parsedQuery.where!.field],
-              parsedQuery.where!.operator,
-              parsedQuery.where!.value
-            )
-          )
-        : tableRows
-
-      const projectedRows = filteredRows.map((row) => projectRow(row, parsedQuery.fields))
-
-      setQueryResultRows(projectedRows)
-      setQueryError(null)
-      setQueryHasRun(true)
-      setStatusMessage(`Query executed: ${projectedRows.length} row(s)`)
-    } catch (error) {
-      setQueryResultRows([])
-      setQueryError(error instanceof Error ? error.message : String(error))
-      setQueryHasRun(true)
-      setStatusMessage('Query failed')
-    }
+    setQueryResultRows(queryResult.rows)
+    setQueryError(queryResult.error)
+    setQueryHasRun(true)
+    setStatusMessage(queryResult.statusMessage)
   }
 
   function toggleTableSort(column: string): void {
@@ -1111,6 +1301,15 @@ function App(): JSX.Element {
             Save As
           </button>
 
+          <button
+            className={hasExternalFileChange ? 'warning-button' : ''}
+            onClick={() => void handleReloadDatabase()}
+            disabled={!filePath}
+            title="Reload the current database from disk"
+          >
+            {hasExternalFileChange ? 'Reload Changed File' : 'Reload'}
+          </button>
+
           <button className="primary" onClick={openCreateSchemaDialog}>
             New Schema
           </button>
@@ -1151,26 +1350,35 @@ function App(): JSX.Element {
         />
 
         <section className="workspace">
-          <WorkspaceHeader
-            selectedSchema={selectedSchema}
-            selectedTable={selectedTable}
-            rowsCount={rows.length}
-            columnsCount={columns.length}
-            filteredRowsCount={filteredRows.length}
-            hasFilter={tableFilter.trim().length > 0}
-            sortSummary={
-              tableSort ? `${tableSort.column} ${tableSort.direction.toUpperCase()}` : null
-            }
-            selectedRowIndex={selectedRowIndex}
-            onAddRow={handleAddRow}
-            onDuplicateRow={handleDuplicateRow}
-            onDeleteRow={handleDeleteRow}
-            onApplyChanges={() => requestRawJsonConfirmation(() => void handleApplyChanges())}
-            canAddRow={Boolean(selectedTable)}
-            canDuplicateRow={selectedRowIndex !== null}
-            canDeleteRow={selectedRowIndex !== null}
-            canApplyChanges={hasUnsavedChanges || isRawDirty}
-          />
+          <div className="workspace-top">
+            {hasExternalFileChange && (
+              <div className="external-change-banner">
+                <span>The opened file changed on disk.</span>
+                <button onClick={() => void handleReloadDatabase()}>Reload from disk</button>
+              </div>
+            )}
+
+            <WorkspaceHeader
+              selectedSchema={selectedSchema}
+              selectedTable={selectedTable}
+              rowsCount={rows.length}
+              columnsCount={columns.length}
+              filteredRowsCount={filteredRows.length}
+              hasFilter={tableFilter.trim().length > 0}
+              sortSummary={
+                tableSort ? `${tableSort.column} ${tableSort.direction.toUpperCase()}` : null
+              }
+              selectedRowIndex={selectedRowIndex}
+              onAddRow={handleAddRow}
+              onDuplicateRow={handleDuplicateRow}
+              onDeleteRow={handleDeleteRow}
+              onApplyChanges={() => requestRawJsonConfirmation(() => void handleApplyChanges())}
+              canAddRow={Boolean(selectedTable)}
+              canDuplicateRow={selectedRowIndex !== null}
+              canDeleteRow={selectedRowIndex !== null}
+              canApplyChanges={hasUnsavedChanges || isRawDirty}
+            />
+          </div>
 
           <div className="tabs">
             <button

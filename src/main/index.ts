@@ -2,13 +2,22 @@ import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { basename, extname, join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { watchFile, unwatchFile } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 
 const RECENT_FILES_LIMIT = 8
 const QUERY_HISTORY_LIMIT = 20
+const FILE_WATCH_INTERVAL_MS = 1000
+const FILE_WATCH_DEBOUNCE_MS = 350
+const INTERNAL_FILE_CHANGE_IGNORE_MS = 2000
 const recentFilesPath = join(app.getPath('userData'), 'recent-files.json')
 const lastOpenedFilePath = join(app.getPath('userData'), 'last-opened-file.json')
 const queryHistoryPath = join(app.getPath('userData'), 'query-history.json')
+
+let watchedDatabasePath: string | null = null
+let watchedWindow: BrowserWindow | null = null
+let pendingWatchNotification: NodeJS.Timeout | null = null
+const ignoredFileChanges = new Map<string, number>()
 
 type RecentFileEntry = {
   filePath: string
@@ -172,6 +181,83 @@ async function removeRecentFile(filePath: string): Promise<string[]> {
   return nextRecentFiles
 }
 
+function markInternalFileChange(filePath: string): void {
+  ignoredFileChanges.set(filePath, Date.now() + INTERNAL_FILE_CHANGE_IGNORE_MS)
+}
+
+function shouldIgnoreFileChange(filePath: string): boolean {
+  const ignoreUntil = ignoredFileChanges.get(filePath)
+
+  if (!ignoreUntil) {
+    return false
+  }
+
+  if (Date.now() <= ignoreUntil) {
+    return true
+  }
+
+  ignoredFileChanges.delete(filePath)
+  return false
+}
+
+function clearPendingWatchNotification(): void {
+  if (pendingWatchNotification) {
+    clearTimeout(pendingWatchNotification)
+    pendingWatchNotification = null
+  }
+}
+
+function stopWatchingDatabaseFile(): void {
+  if (watchedDatabasePath) {
+    unwatchFile(watchedDatabasePath)
+  }
+
+  watchedDatabasePath = null
+  watchedWindow = null
+  clearPendingWatchNotification()
+}
+
+function startWatchingDatabaseFile(filePath: string, window: BrowserWindow): void {
+  stopWatchingDatabaseFile()
+
+  watchedDatabasePath = filePath
+  watchedWindow = window
+
+  watchFile(
+    filePath,
+    {
+      interval: FILE_WATCH_INTERVAL_MS
+    },
+    (currentStat, previousStat) => {
+      if (!watchedWindow || watchedWindow.isDestroyed()) {
+        stopWatchingDatabaseFile()
+        return
+      }
+
+      if (currentStat.mtimeMs === previousStat.mtimeMs && currentStat.size === previousStat.size) {
+        return
+      }
+
+      if (shouldIgnoreFileChange(filePath)) {
+        return
+      }
+
+      clearPendingWatchNotification()
+
+      pendingWatchNotification = setTimeout(() => {
+        if (!watchedWindow || watchedWindow.isDestroyed()) {
+          stopWatchingDatabaseFile()
+          return
+        }
+
+        watchedWindow.webContents.send('fake-db:database-file-changed', {
+          filePath
+        })
+      }, FILE_WATCH_DEBOUNCE_MS)
+    }
+  )
+}
+
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -241,6 +327,7 @@ ipcMain.handle('fake-db:open-database', async () => {
 
 ipcMain.handle('fake-db:save-database', async (_, filePath: string, content: string) => {
   try {
+    markInternalFileChange(filePath)
     await writeFile(filePath, content, 'utf-8')
     await pushRecentFile(filePath)
 
@@ -276,6 +363,7 @@ ipcMain.handle('fake-db:save-database-as', async (_, content: string) => {
   }
 
   try {
+    markInternalFileChange(result.filePath)
     await writeFile(result.filePath, content, 'utf-8')
     await pushRecentFile(result.filePath)
 
@@ -335,6 +423,42 @@ ipcMain.handle('fake-db:open-recent-database', async (_, filePath: string) => {
   }
 })
 
+ipcMain.handle('fake-db:reload-database', async (_, filePath: string) => {
+  try {
+    const content = await readFile(filePath, 'utf-8')
+
+    return {
+      success: true,
+      filePath,
+      content
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+})
+
+ipcMain.handle('fake-db:watch-database', (event, filePath: string | null) => {
+  if (!filePath) {
+    stopWatchingDatabaseFile()
+    return { success: true }
+  }
+
+  const window = BrowserWindow.fromWebContents(event.sender)
+
+  if (!window) {
+    return {
+      success: false,
+      error: 'Unable to bind file watcher to the current window'
+    }
+  }
+
+  startWatchingDatabaseFile(filePath, window)
+  return { success: true }
+})
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -365,6 +489,8 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  stopWatchingDatabaseFile()
+
   if (process.platform !== 'darwin') {
     app.quit()
   }
