@@ -104,5 +104,4 @@ jobs:
           path: |
             dist/*.AppImage
             dist/*.deb
-            dist/*.snap
             dist/latest-linux*.yml
