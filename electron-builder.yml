@@ -14,11 +14,20 @@ asarUnpack:
 win:
   executableName: FakeDB Studio
   icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 mac:
   icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
@@ -42,7 +51,7 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  releaseType: draft
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
